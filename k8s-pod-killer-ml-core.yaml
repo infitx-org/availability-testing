@@ -1,0 +1,143 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ha-pod-killer-ml-core
+  namespace: mojaloop
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ha-pod-killer-ml-core
+  namespace: mojaloop
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ha-pod-killer-ml-core
+  namespace: mojaloop
+subjects:
+  - kind: ServiceAccount
+    name: ha-pod-killer-ml-core
+    namespace: mojaloop
+roleRef:
+  kind: Role
+  name: ha-pod-killer-ml-core
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ha-pod-killer-ml-core-script
+  namespace: mojaloop
+data:
+  kill-pods.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NS="mojaloop"
+    SLEEP_SECS="${SLEEP_SECS:-120}"
+    DRY_RUN="${DRY_RUN:-false}"
+
+    # List of deployment names (exact names, not patterns)
+    deployments=(
+      "account-lookup-service"
+      "als-msisdn-oracle"
+      "centralledger-service"
+      "centralledger-handler-transfer-prepare"
+      "moja-handler-pos-batch"
+      "centralledger-handler-transfer-get"
+      "centralledger-handler-transfer-fulfil"
+      "centralledger-handler-timeout"
+      "ml-api-adapter-service"
+      "ml-api-adapter-handler-notification"
+      "quoting-service"
+      "quoting-service-handler"
+    )
+
+    # Array to store report data
+    declare -a report_data=()
+
+    echo "Namespace: ${NS}"
+    echo "Sleep between components: ${SLEEP_SECS}s"
+    echo "Dry run: ${DRY_RUN}"
+    echo
+
+    for deployment in "${deployments[@]}"; do
+      echo "==> Handling deployment: ${deployment}"
+
+      victim=$(kubectl get pods -n "${NS}" -l "app.kubernetes.io/name=${deployment}" \
+        --field-selector=status.phase=Running \
+        --no-headers -o custom-columns=":metadata.name" \
+        | head -n 1 || true)
+
+      if [[ -z "${victim}" ]]; then
+        echo "   No running pods found for deployment '${deployment}'. Skipping."
+        echo
+        continue
+      fi
+
+      echo "   Selected pod to delete: ${victim}"
+
+      if [[ "${DRY_RUN}" == "true" ]]; then
+        echo "   [DRY RUN] kubectl delete pod -n ${NS} ${victim}"
+        termination_time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        report_data+=("${victim}|${termination_time}|DRY_RUN")
+      else
+        termination_time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        kubectl delete pod -n "${NS}" "${victim}"
+        report_data+=("${victim}|${termination_time}|DELETED")
+      fi
+
+      echo "   Pod termination timestamp: ${termination_time}"
+      echo "   Sleeping ${SLEEP_SECS}s before next component..."
+      sleep "${SLEEP_SECS}"
+      echo
+    done
+
+    echo "=========================================="
+    echo "           TERMINATION REPORT            "
+    echo "=========================================="
+    echo
+    printf "%-60s | %-25s | %-10s\n" "Pod" "Termination Time" "Status"
+    printf "%-60s-+-%-25s-+-%-10s\n" "------------------------------------------------------------" "-------------------------" "----------"
+
+    for entry in "${report_data[@]}"; do
+      IFS='|' read -r pod_name term_time status <<< "$entry"
+      printf "%-60s | %-25s | %-10s\n" "$pod_name" "$term_time" "$status"
+    done
+
+    echo
+    echo "All done. Total pods processed: ${#report_data[@]}"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ha-pod-killer-ml-core
+  namespace: mojaloop
+  labels:
+    app: ha-pod-killer-ml-core
+spec:
+  serviceAccountName: ha-pod-killer-ml-core
+  restartPolicy: Never
+  containers:
+    - name: ha-pod-killer-ml-core
+      image: bitnami/kubectl:latest
+      command: ["/bin/bash", "/scripts/kill-pods.sh"]
+      env:
+        - name: SLEEP_SECS
+          value: "120"
+        - name: DRY_RUN
+          value: "false"
+      volumeMounts:
+        - name: script
+          mountPath: /scripts
+          readOnly: true
+  volumes:
+    - name: script
+      configMap:
+        name: ha-pod-killer-ml-core-script
+        defaultMode: 0755
