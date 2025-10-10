@@ -1,0 +1,195 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pod-killer-redis-kafka
+  namespace: mojaloop
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-redis-kafka-mojaloop
+  namespace: mojaloop
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-redis-kafka-kafka
+  namespace: moja-kafka
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-redis-kafka-mojaloop
+  namespace: mojaloop
+subjects:
+  - kind: ServiceAccount
+    name: pod-killer-redis-kafka
+    namespace: mojaloop
+roleRef:
+  kind: Role
+  name: pod-killer-redis-kafka-mojaloop
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-redis-kafka-kafka
+  namespace: moja-kafka
+subjects:
+  - kind: ServiceAccount
+    name: pod-killer-redis-kafka
+    namespace: mojaloop
+roleRef:
+  kind: Role
+  name: pod-killer-redis-kafka-kafka
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pod-killer-redis-kafka-script
+  namespace: mojaloop
+data:
+  kill-pods.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    KAFKA_NS="${KAFKA_NS:-moja-kafka}"
+    REDIS_NS="${REDIS_NS:-mojaloop}"
+
+    KAFKA_INTERVAL=${KAFKA_INTERVAL:-300}
+    REDIS_INTERVAL=${REDIS_INTERVAL:-180}
+    REDIS_OFFSET=${REDIS_OFFSET:-90}
+    DRY_RUN="${DRY_RUN:-false}"
+
+    KAFKA_PODS=(
+      "mojaloop-kafka-mojaloop-kafka-nodepool-0"
+      "mojaloop-kafka-mojaloop-kafka-nodepool-1"
+      "mojaloop-kafka-mojaloop-kafka-nodepool-2"
+    )
+    REDIS_PODS=(
+      "mojaloop-redis-follower-0"
+      "mojaloop-redis-leader-0"
+      "mojaloop-redis-follower-1"
+      "mojaloop-redis-leader-1"
+      "mojaloop-redis-follower-2"
+      "mojaloop-redis-leader-2"
+    )
+
+    # Array to store report data
+    declare -a report_data=()
+
+    log(){ echo "[$(date -u -Is)] $*"; }
+
+    delete_pod(){
+      ns="$1"; pod="$2"
+      termination_time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+      if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] kubectl -n $ns delete pod $pod"
+        report_data+=("${pod}|${ns}|${termination_time}|DRY_RUN")
+      else
+        log "Deleting pod $pod in $ns"
+        kubectl -n "$ns" delete pod "$pod" || true
+        report_data+=("${pod}|${ns}|${termination_time}|DELETED")
+      fi
+    }
+
+    k=0; r=0
+    t_now=0
+    t_kafka=0
+    t_redis=$REDIS_OFFSET
+
+    log "Start | Kafka every ${KAFKA_INTERVAL}s | Redis every ${REDIS_INTERVAL}s (offset ${REDIS_OFFSET}s) | dry_run=$DRY_RUN"
+
+    while (( k < ${#KAFKA_PODS[@]} || r < ${#REDIS_PODS[@]} )); do
+      next=$((1<<30))
+      if (( k < ${#KAFKA_PODS[@]} )) && (( t_kafka < next )); then
+        next=$t_kafka
+      fi
+      if (( r < ${#REDIS_PODS[@]} )) && (( t_redis < next )); then
+        next=$t_redis
+      fi
+
+      sleep_secs=$(( next - t_now ))
+      if (( sleep_secs > 0 )); then
+        sleep "$sleep_secs"
+      fi
+      t_now=$next
+
+      if (( k < ${#KAFKA_PODS[@]} )) && (( t_now == t_kafka )); then
+        delete_pod "$KAFKA_NS" "${KAFKA_PODS[$k]}"
+        ((k+=1))
+        t_kafka=$(( t_kafka + KAFKA_INTERVAL ))
+      fi
+
+      if (( r < ${#REDIS_PODS[@]} )) && (( t_now == t_redis )); then
+        delete_pod "$REDIS_NS" "${REDIS_PODS[$r]}"
+        ((r+=1))
+        t_redis=$(( t_redis + REDIS_INTERVAL ))
+      fi
+    done
+
+    log "All done."
+
+    echo
+    echo "=========================================="
+    echo "           TERMINATION REPORT            "
+    echo "=========================================="
+    echo
+    printf "%-60s | %-15s | %-25s | %-10s\n" "Pod" "Namespace" "Termination Time" "Status"
+    printf "%-60s-+-%-15s-+-%-25s-+-%-10s\n" "------------------------------------------------------------" "---------------" "-------------------------" "----------"
+
+    for entry in "${report_data[@]}"; do
+      IFS='|' read -r pod_name ns term_time status <<< "$entry"
+      printf "%-60s | %-15s | %-25s | %-10s\n" "$pod_name" "$ns" "$term_time" "$status"
+    done
+
+    echo
+    echo "Total pods processed: ${#report_data[@]}"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-killer-redis-kafka
+  namespace: mojaloop
+  labels:
+    app: pod-killer-redis-kafka
+spec:
+  serviceAccountName: pod-killer-redis-kafka
+  restartPolicy: Never
+  containers:
+    - name: pod-killer
+      image: bitnami/kubectl:latest
+      command: ["/bin/bash", "/scripts/kill-pods.sh"]
+      env:
+        - name: KAFKA_NS
+          value: "moja-kafka"
+        - name: REDIS_NS
+          value: "mojaloop"
+        - name: KAFKA_INTERVAL
+          value: "300"
+        - name: REDIS_INTERVAL
+          value: "180"
+        - name: REDIS_OFFSET
+          value: "90"
+        - name: DRY_RUN
+          value: "false"
+      volumeMounts:
+        - name: script
+          mountPath: /scripts
+          readOnly: true
+  volumes:
+    - name: script
+      configMap:
+        name: pod-killer-redis-kafka-script
+        defaultMode: 0755
