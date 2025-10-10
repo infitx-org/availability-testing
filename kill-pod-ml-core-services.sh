@@ -10,7 +10,7 @@ deployments=(
   "als-msisdn-oracle"
   "centralledger-service"
   "centralledger-handler-transfer-prepare"
-  "centralledger-handler-transfer-position"
+  "moja-handler-pos-batch"
   "centralledger-handler-transfer-get"
   "centralledger-handler-transfer-fulfil"
   "centralledger-handler-timeout"
