@@ -6,6 +6,7 @@ require('dotenv').config();
 const GRAFANA_URL = `${process.env.GRAFANA_URL}/api/annotations`;
 const GRAFANA_TOKEN = process.env.GRAFANA_TOKEN;
 const ANNOTATION_TAG = 'custom-annotation';
+const PREFIX = process.env.PREFIX || 'Pod';
 
 /**
  * Parse CSV file and return array of objects
@@ -102,7 +103,7 @@ async function main() {
 
     const result = await createAnnotation(
       terminationTime,
-      podName,
+      PREFIX + ' ' + podName,
       [ANNOTATION_TAG]
     );
 

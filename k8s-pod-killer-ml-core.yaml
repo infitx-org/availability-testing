@@ -129,9 +129,9 @@ spec:
       command: ["/bin/bash", "/scripts/kill-pods.sh"]
       env:
         - name: SLEEP_SECS
-          value: "1"
+          value: "120"
         - name: DRY_RUN
-          value: "true"
+          value: "false"
       volumeMounts:
         - name: script
           mountPath: /scripts
