@@ -92,15 +92,15 @@ data:
 
     delete_pod(){
       ns="$1"; pod="$2"
-      termination_time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+      termination_epoch=$(date -u '+%s%3N')
 
       if [[ "$DRY_RUN" == "true" ]]; then
         log "[DRY RUN] kubectl -n $ns delete pod $pod"
-        report_data+=("${pod}|${ns}|${termination_time}|DRY_RUN")
+        report_data+=("${pod}|${termination_epoch}|DRY_RUN")
       else
         log "Deleting pod $pod in $ns"
         kubectl -n "$ns" delete pod "$pod" || true
-        report_data+=("${pod}|${ns}|${termination_time}|DELETED")
+        report_data+=("${pod}|${termination_epoch}|DELETED")
       fi
     }
 
@@ -143,15 +143,14 @@ data:
 
     echo
     echo "=========================================="
-    echo "           TERMINATION REPORT            "
+    echo "           TERMINATION REPORT (CSV)      "
     echo "=========================================="
     echo
-    printf "%-60s | %-15s | %-25s | %-10s\n" "Pod" "Namespace" "Termination Time" "Status"
-    printf "%-60s-+-%-15s-+-%-25s-+-%-10s\n" "------------------------------------------------------------" "---------------" "-------------------------" "----------"
+    echo "Pod,Termination Time,Status"
 
     for entry in "${report_data[@]}"; do
-      IFS='|' read -r pod_name ns term_time status <<< "$entry"
-      printf "%-60s | %-15s | %-25s | %-10s\n" "$pod_name" "$ns" "$term_time" "$status"
+      IFS='|' read -r pod_name term_epoch status <<< "$entry"
+      echo "${pod_name},${term_epoch},${status}"
     done
 
     echo
