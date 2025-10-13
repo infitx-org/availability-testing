@@ -1,0 +1,226 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pod-killer-istio
+  namespace: istio-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-istio-ingress-ext
+  namespace: istio-ingress-ext
+rules:
+- apiGroups: [ "" ]
+  resources: [ "pods" ]
+  verbs: [ "get", "list", "watch", "delete" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-istio-ingress-int
+  namespace: istio-ingress-int
+rules:
+- apiGroups: [ "" ]
+  resources: [ "pods" ]
+  verbs: [ "get", "list", "watch", "delete" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-istio-system
+  namespace: istio-system
+rules:
+- apiGroups: [ "" ]
+  resources: [ "pods" ]
+  verbs: [ "get", "list", "watch", "delete" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-istio-ingress-ext
+  namespace: istio-ingress-ext
+subjects:
+- kind: ServiceAccount
+  name: pod-killer-istio
+  namespace: istio-system
+roleRef:
+  kind: Role
+  name: pod-killer-istio-ingress-ext
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-istio-ingress-int
+  namespace: istio-ingress-int
+subjects:
+- kind: ServiceAccount
+  name: pod-killer-istio
+  namespace: istio-system
+roleRef:
+  kind: Role
+  name: pod-killer-istio-ingress-int
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-istio-system
+  namespace: istio-system
+subjects:
+- kind: ServiceAccount
+  name: pod-killer-istio
+  namespace: istio-system
+roleRef:
+  kind: Role
+  name: pod-killer-istio-system
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pod-killer-istio-script
+  namespace: istio-system
+data:
+  kill-pods.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Namespaces (override via env if needed)
+    ISTIO_NS_EXT="${ISTIO_NS_EXT:-istio-ingress-ext}"
+    ISTIO_NS_INT="${ISTIO_NS_INT:-istio-ingress-int}"
+    ISTIO_NS_SYS="${ISTIO_NS_SYS:-istio-system}"
+
+    # Kill patterns (prefixes)
+    PATTERN_EXT="${PATTERN_EXT:-^istio-external-ingress-gw-}"
+    PATTERN_INT="${PATTERN_INT:-^istio-internal-ingress-gw-}"
+    PATTERN_SYS="${PATTERN_SYS:-^ztunnel-}"
+
+    # Sleep between kills (seconds)
+    SLEEP_SECONDS="${SLEEP_SECONDS:-120}"
+
+    # DRY run mode (true/false)
+    DRY_RUN="${DRY_RUN:-false}"
+
+    log(){ echo "[$(date -u -Is)] $*"; }
+
+    # report_data entries: ns|pod|epochMillis|status
+    declare -a report_data=()
+
+    # Return list of target pods in a namespace matching a regex
+    find_pods(){
+      local ns="$1" regex="$2"
+      # Use jsonpath to list pod names, then grep by regex
+      kubectl -n "$ns" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E "$regex" || true
+    }
+
+    delete_pod(){
+      local ns="$1" pod="$2"
+      local epoch_ms
+      # millis since epoch (portable)
+      epoch_ms=$(($(date +%s%N)/1000000))
+
+      if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] kubectl -n $ns delete pod $pod"
+        report_data+=("${ns}|${pod}|${epoch_ms}|DRY_RUN")
+      else
+        log "Deleting pod '$pod' in namespace '$ns'"
+        if kubectl -n "$ns" delete pod "$pod" --ignore-not-found --grace-period=0 --force >/dev/null 2>&1; then
+          report_data+=("${ns}|${pod}|${epoch_ms}|DELETED")
+        else
+          report_data+=("${ns}|${pod}|${epoch_ms}|DELETE_ERROR")
+        fi
+      fi
+    }
+
+    # Build ordered target list once at start (one-by-one processing)
+    declare -a TARGETS=()
+
+    # External ingress gateways
+    while IFS= read -r p; do
+      [[ -n "$p" ]] && TARGETS+=("${ISTIO_NS_EXT}|${p}")
+    done < <(find_pods "$ISTIO_NS_EXT" "$PATTERN_EXT")
+
+    # Internal ingress gateways
+    while IFS= read -r p; do
+      [[ -n "$p" ]] && TARGETS+=("${ISTIO_NS_INT}|${p}")
+    done < <(find_pods "$ISTIO_NS_INT" "$PATTERN_INT")
+
+    # ztunnel pods (ambient)
+    while IFS= read -r p; do
+      [[ -n "$p" ]] && TARGETS+=("${ISTIO_NS_SYS}|${p}")
+    done < <(find_pods "$ISTIO_NS_SYS" "$PATTERN_SYS")
+
+    log "Start | dry_run=$DRY_RUN | sleep=${SLEEP_SECONDS}s | targets=${#TARGETS[@]}"
+    log "Patterns: ${PATTERN_EXT} (ns=${ISTIO_NS_EXT}), ${PATTERN_INT} (ns=${ISTIO_NS_INT}), ${PATTERN_SYS} (ns=${ISTIO_NS_SYS})"
+
+    if (( ${#TARGETS[@]} == 0 )); then
+      log "No matching Istio pods found. Exiting."
+    else
+      # One-by-one: kill, then sleep, loop
+      for item in "${TARGETS[@]}"; do
+        ns="${item%%|*}"
+        pod="${item##*|}"
+
+        delete_pod "$ns" "$pod"
+        log "Sleeping ${SLEEP_SECONDS}s before next pod..."
+        sleep "${SLEEP_SECONDS}"
+      done
+    fi
+
+    log "All done."
+
+    echo
+    echo "=========================================="
+    echo "          TERMINATION REPORT (CSV)        "
+    echo "=========================================="
+    echo
+    echo "Namespace,Pod,TerminationEpochMillis,Status"
+    for entry in "${report_data[@]}"; do
+      IFS='|' read -r ns pod epoch status <<< "$entry"
+      echo "${ns},${pod},${epoch},${status}"
+    done
+    echo
+    echo "Total pods processed: ${#report_data[@]}"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-killer-istio
+  namespace: istio-system
+  labels:
+    app: pod-killer-istio
+spec:
+  serviceAccountName: pod-killer-istio
+  restartPolicy: Never
+  containers:
+  - name: pod-killer
+    image: bitnami/kubectl:latest
+    command: [ "/bin/bash", "/scripts/kill-pods.sh" ]
+    env:
+    - name: ISTIO_NS_EXT
+      value: "istio-ingress-ext"
+    - name: ISTIO_NS_INT
+      value: "istio-ingress-int"
+    - name: ISTIO_NS_SYS
+      value: "istio-system"
+    - name: PATTERN_EXT
+      value: "^istio-external-ingress-gw-"
+    - name: PATTERN_INT
+      value: "^istio-internal-ingress-gw-"
+    - name: PATTERN_SYS
+      value: "^ztunnel-"
+    - name: SLEEP_SECONDS
+      value: "2"
+    - name: DRY_RUN
+      value: "true"
+    volumeMounts:
+    - name: script
+      mountPath: /scripts
+      readOnly: true
+  volumes:
+  - name: script
+    configMap:
+      name: pod-killer-istio-script
+      defaultMode: 493
