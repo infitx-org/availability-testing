@@ -1,0 +1,22 @@
+{
+  "name": "availability-testing",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/infitx-org/availability-testing.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/infitx-org/availability-testing/issues"
+  },
+  "homepage": "https://github.com/infitx-org/availability-testing#readme",
+  "dependencies": {
+    "dotenv": "^17.2.3"
+  }
+}

@@ -84,34 +84,34 @@ data:
 
       if [[ "${DRY_RUN}" == "true" ]]; then
         echo "   [DRY RUN] kubectl delete pod -n ${NS} ${victim}"
-        termination_time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-        report_data+=("${victim}|${termination_time}|DRY_RUN")
+        termination_epoch=$(date -u '+%s%3N')
+        report_data+=("${victim}|${termination_epoch}|DRY_RUN")
       else
-        termination_time=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        termination_epoch=$(date -u '+%s%3N')
         kubectl delete pod -n "${NS}" "${victim}"
-        report_data+=("${victim}|${termination_time}|DELETED")
+        report_data+=("${victim}|${termination_epoch}|DELETED")
       fi
 
-      echo "   Pod termination timestamp: ${termination_time}"
+      echo "   Pod termination epoch: ${termination_epoch}"
       echo "   Sleeping ${SLEEP_SECS}s before next component..."
       sleep "${SLEEP_SECS}"
       echo
     done
 
+    echo
     echo "=========================================="
-    echo "           TERMINATION REPORT            "
+    echo "           TERMINATION REPORT (CSV)      "
     echo "=========================================="
     echo
-    printf "%-60s | %-25s | %-10s\n" "Pod" "Termination Time" "Status"
-    printf "%-60s-+-%-25s-+-%-10s\n" "------------------------------------------------------------" "-------------------------" "----------"
+    echo "Pod,Termination Time,Status"
 
     for entry in "${report_data[@]}"; do
-      IFS='|' read -r pod_name term_time status <<< "$entry"
-      printf "%-60s | %-25s | %-10s\n" "$pod_name" "$term_time" "$status"
+      IFS='|' read -r pod_name term_epoch status <<< "$entry"
+      echo "${pod_name},${term_epoch},${status}"
     done
 
     echo
-    echo "All done. Total pods processed: ${#report_data[@]}"
+    echo "Total pods processed: ${#report_data[@]}"
 ---
 apiVersion: v1
 kind: Pod
@@ -129,9 +129,9 @@ spec:
       command: ["/bin/bash", "/scripts/kill-pods.sh"]
       env:
         - name: SLEEP_SECS
-          value: "120"
+          value: "1"
         - name: DRY_RUN
-          value: "false"
+          value: "true"
       volumeMounts:
         - name: script
           mountPath: /scripts
