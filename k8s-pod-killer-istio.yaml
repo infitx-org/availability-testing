@@ -224,7 +224,7 @@ spec:
     - name: PATTERN_SYS
       value: "^ztunnel-"
     - name: SLEEP_SECONDS
-      value: "120"
+      value: "180"
     - name: DRY_RUN
       value: "false"
     volumeMounts:
