@@ -1,0 +1,41 @@
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<5000' p(95)=4.44s
+
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.05%
+
+    iteration_duration
+    ✓ 'p(95)<8000' p(95)=7.78s
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......................: 6989   7.690843/s
+    checks_succeeded...................: 99.95% 6986 out of 6989
+    checks_failed......................: 0.04%  3 out of 6989
+
+    ✗ TRANSFERS__POST_TRANSFERS_RESPONSE_IS_200
+      ↳  99% — ✓ 1398 / ✗ 2
+    ✗ TRANSFERS__PUT_TRANSFERS_ACCEPT_PARTY_RESPONSE_IS_200
+      ↳  99% — ✓ 1397 / ✗ 1
+    ✓ TRANSFERS__PUT_TRANSFERS_ACCEPT_CONVERSION_RESPONSE_IS_200
+    ✓ TRANSFERS__PUT_TRANSFERS_ACCEPT_QUOTE_RESPONSE_IS_200
+    ✓ SDK_E2E_STATUS_COMPLETED
+
+    HTTP
+    http_req_duration.......................................................: avg=1.61s min=302.8ms  med=867.63ms max=30.01s p(90)=4s   p(95)=4.44s
+      { expected_response:true }............................................: avg=1.61s min=302.8ms  med=867.66ms max=11.12s p(90)=4s   p(95)=4.44s
+    http_req_failed.........................................................: 0.05%  3 out of 5594
+    http_reqs...............................................................: 5594   6.155755/s
+
+    EXECUTION
+    iteration_duration......................................................: avg=6.45s min=339.57ms med=6.29s    max=30.78s p(90)=7.4s p(95)=7.78s
+    iterations..............................................................: 1400   1.540589/s
+    vus.....................................................................: 1      min=0         max=10
+    vus_max.................................................................: 10     min=10        max=10
+
+    NETWORK
+    data_received...........................................................: 95 MB  105 kB/s
+    data_sent...............................................................: 1.9 MB 2.1 kB/s
