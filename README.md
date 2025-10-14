@@ -69,6 +69,47 @@ The specified folder must contain:
 - Sorts all data chronologically
 - Displays sample merged data in console output
 
+## Pod Killer
+
+Kubernetes manifests for simulating pod failures in various namespaces. These tools help test high availability and resilience by randomly terminating pods during test runs.
+
+**Available Configurations:**
+- [k8s-pod-killer-istio.yaml](pod-killer/k8s-pod-killer-istio.yaml) - Terminates Istio ingress gateway and ztunnel pods
+- [k8s-pod-killer-ml-core.yaml](pod-killer/k8s-pod-killer-ml-core.yaml) - Terminates ML core service pods
+- [k8s-pod-killer-redis-kafka.yaml](pod-killer/k8s-pod-killer-redis-kafka.yaml) - Terminates Redis and Kafka pods
+- [k8s-pod-killer-security.yaml](pod-killer/k8s-pod-killer-security.yaml) - Terminates security service pods
+
+**How it works:**
+1. Deploys a Kubernetes Job/Pod with RBAC permissions to delete pods
+2. Randomly selects one pod per configured pattern in target namespaces
+3. Deletes pods with configurable sleep intervals between terminations
+4. Outputs CSV report with pod names, termination timestamps, and status
+
+**Configuration:**
+Each manifest can be customized via environment variables:
+- `SLEEP_SECONDS`: Interval between pod deletions (default: 120-180s depending on manifest)
+- `DRY_RUN`: Set to `true` to simulate without actually deleting pods
+- Namespace and pod name patterns can be adjusted per use case
+
+**Usage:**
+```bash
+# Deploy the pod killer (example for Istio)
+kubectl apply -f pod-killer/k8s-pod-killer-istio.yaml
+
+# Monitor the pod killer logs
+kubectl logs -n istio-system pod-killer-istio -f
+
+# View the termination report in the logs (CSV format at the end)
+```
+
+**Output:**
+The pod killer generates a CSV report in the logs with columns:
+- `Pod`: Name of the terminated pod
+- `Termination time`: Unix timestamp in milliseconds
+- `Status`: DELETED, DRY_RUN, or DELETE_ERROR
+
+This CSV output can be saved to `pod-terminations.csv` for use with the analysis scripts.
+
 ## Typical Workflow
 
 1. Run your HA tests and collect pod termination data and k6 metrics
