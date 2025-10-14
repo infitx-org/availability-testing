@@ -1,0 +1,185 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pod-killer-proxies
+  namespace: proxy-zmw
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-proxy-zmw
+  namespace: proxy-zmw
+rules:
+- apiGroups: [ "" ]
+  resources: [ "pods" ]
+  verbs: [ "get", "list", "watch", "delete" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-proxy-mwk
+  namespace: proxy-mwk
+rules:
+- apiGroups: [ "" ]
+  resources: [ "pods" ]
+  verbs: [ "get", "list", "watch", "delete" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-proxy-zmw
+  namespace: proxy-zmw
+subjects:
+- kind: ServiceAccount
+  name: pod-killer-proxies
+  namespace: proxy-zmw
+roleRef:
+  kind: Role
+  name: pod-killer-proxy-zmw
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-proxy-mwk
+  namespace: proxy-mwk
+subjects:
+- kind: ServiceAccount
+  name: pod-killer-proxies
+  namespace: proxy-zmw
+roleRef:
+  kind: Role
+  name: pod-killer-proxy-mwk
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pod-killer-proxies-script
+  namespace: proxy-zmw
+data:
+  kill-proxies.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Log to stderr to keep stdout clean for the final REPORT
+    log(){ echo "[$(date -u -Is)] $*" >&2; }
+
+    # Namespaces
+    NS_ZMW="${NS_ZMW:-proxy-zmw}"
+    NS_MWK="${NS_MWK:-proxy-mwk}"
+
+    # Pattern: proxy-*-inter-scheme-proxy-adapter-**
+    PATTERN_PROXY="${PATTERN_PROXY:-^proxy-[a-z0-9-]*-inter-scheme-proxy-adapter-[a-z0-9]+-[a-z0-9]+$}"
+
+    # Sleep between kills (seconds) => default 300s = 5 minutes
+    SLEEP_SECONDS="${SLEEP_SECONDS:-300}"
+
+    # DRY run mode (true/false)
+    DRY_RUN="${DRY_RUN:-true}"
+
+    # CSV report accumulator: ns|pod|epochMillis|status
+    declare -a report_data=()
+
+    find_pods(){
+      local ns="$1" regex="$2"
+      kubectl -n "$ns" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E "$regex" || true
+    }
+
+    pick_one(){
+      local ns="$1" regex="$2"
+      local -a arr=()
+      while IFS= read -r p; do
+        [[ -n "$p" ]] && arr+=("$p")
+      done < <(find_pods "$ns" "$regex")
+      local count="${#arr[@]}"
+      if (( count == 0 )); then
+        echo ""
+      else
+        local idx=$(( RANDOM % count ))
+        echo "${arr[$idx]}"
+      fi
+    }
+
+    delete_pod(){
+      local ns="$1" pod="$2"
+      local epoch_ms
+      epoch_ms=$(($(date +%s%N)/1000000))
+      if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] kubectl -n $ns delete pod $pod"
+        report_data+=("${ns}|${pod}|${epoch_ms}|DRY_RUN")
+      else
+        log "Deleting pod '$pod' in namespace '$ns'"
+        if kubectl -n "$ns" delete pod "$pod" --ignore-not-found --grace-period=0 --force >/dev/null 2>&1; then
+          report_data+=("${ns}|${pod}|${epoch_ms}|DELETED")
+        else
+          report_data+=("${ns}|${pod}|${epoch_ms}|DELETE_ERROR")
+        fi
+      fi
+    }
+
+    # ---- Single-run sequence: ZMW -> sleep -> MWK -> report -> exit ----
+    p_zmw="$(pick_one "$NS_ZMW" "$PATTERN_PROXY")"
+    if [[ -n "$p_zmw" ]]; then
+      delete_pod "$NS_ZMW" "$p_zmw"
+    else
+      log "No matching proxy pod found in $NS_ZMW"
+    fi
+
+    log "Sleeping ${SLEEP_SECONDS}s between kills..."
+    sleep "${SLEEP_SECONDS}"
+
+    p_mwk="$(pick_one "$NS_MWK" "$PATTERN_PROXY")"
+    if [[ -n "$p_mwk" ]]; then
+      delete_pod "$NS_MWK" "$p_mwk"
+    else
+      log "No matching proxy pod found in $NS_MWK"
+    fi
+
+    # ----- FINAL REPORT (stdout only, EXACTLY as requested) -----
+    echo "=========================================="
+    echo "          TERMINATION REPORT (CSV)        "
+    echo "=========================================="
+    echo
+    echo "Pod,Termination Time,Status"
+    for entry in "${report_data[@]}"; do
+      IFS='|' read -r ns pod epoch status <<< "$entry"
+      echo "${pod},${epoch},${status}"
+    done
+    echo
+    echo "Total pods processed: ${#report_data[@]}"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-killer-proxies
+  namespace: proxy-zmw
+  labels:
+    app: pod-killer-proxies
+spec:
+  serviceAccountName: pod-killer-proxies
+  restartPolicy: Never
+  containers:
+  - name: pod-killer
+    image: bitnami/kubectl:latest
+    command: [ "/bin/bash", "/scripts/kill-proxies.sh" ]
+    env:
+    - name: NS_ZMW
+      value: "proxy-zmw"
+    - name: NS_MWK
+      value: "proxy-mwk"
+    - name: PATTERN_PROXY
+      value: "^proxy-[a-z0-9-]*-inter-scheme-proxy-adapter-[a-z0-9]+-[a-z0-9]+$"
+    - name: SLEEP_SECONDS
+      value: "300"
+    - name: DRY_RUN
+      value: "true"
+    volumeMounts:
+    - name: script
+      mountPath: /scripts
+      readOnly: true
+  volumes:
+  - name: script
+    configMap:
+      name: pod-killer-proxies-script
+      defaultMode: 493
