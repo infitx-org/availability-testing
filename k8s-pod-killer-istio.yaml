@@ -188,10 +188,10 @@ data:
     echo "          TERMINATION REPORT (CSV)        "
     echo "=========================================="
     echo
-    echo "Namespace,Pod,TerminationEpochMillis,Status"
+    echo "Pod,Termination time,Status"
     for entry in "${report_data[@]}"; do
       IFS='|' read -r ns pod epoch status <<< "$entry"
-      echo "${ns},${pod},${epoch},${status}"
+      echo "${pod},${epoch},${status}"
     done
     echo
     echo "Total pods processed: ${#report_data[@]}"

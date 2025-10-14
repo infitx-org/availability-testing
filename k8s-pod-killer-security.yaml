@@ -1,0 +1,287 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pod-killer-security
+  namespace: ory
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-ory
+  namespace: ory
+rules:
+- apiGroups: [ "" ]
+  resources: [ "pods" ]
+  verbs: [ "get", "list", "watch", "delete" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-vault
+  namespace: vault
+rules:
+- apiGroups: [ "" ]
+  resources: [ "pods" ]
+  verbs: [ "get", "list", "watch", "delete" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-mcm
+  namespace: mcm
+rules:
+- apiGroups: [ "" ]
+  resources: [ "pods" ]
+  verbs: [ "get", "list", "watch", "delete" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-killer-keycloak
+  namespace: keycloak
+rules:
+- apiGroups: [ "" ]
+  resources: [ "pods" ]
+  verbs: [ "get", "list", "watch", "delete" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-ory
+  namespace: ory
+subjects:
+- kind: ServiceAccount
+  name: pod-killer-security
+  namespace: ory
+roleRef:
+  kind: Role
+  name: pod-killer-ory
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-vault
+  namespace: vault
+subjects:
+- kind: ServiceAccount
+  name: pod-killer-security
+  namespace: ory
+roleRef:
+  kind: Role
+  name: pod-killer-vault
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-mcm
+  namespace: mcm
+subjects:
+- kind: ServiceAccount
+  name: pod-killer-security
+  namespace: ory
+roleRef:
+  kind: Role
+  name: pod-killer-mcm
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-killer-keycloak
+  namespace: keycloak
+subjects:
+- kind: ServiceAccount
+  name: pod-killer-security
+  namespace: ory
+roleRef:
+  kind: Role
+  name: pod-killer-keycloak
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pod-killer-security-script
+  namespace: ory
+data:
+  kill-pods.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Namespaces (override via env if needed)
+    NS_VAULT="${NS_VAULT:-vault}"
+    NS_ORY="${NS_ORY:-ory}"
+    NS_MCM="${NS_MCM:-mcm}"
+    NS_KEYCLOAK="${NS_KEYCLOAK:-keycloak}"
+
+    # Patterns
+    # Vault sts pods only
+    PATTERN_VAULT="${PATTERN_VAULT:-^vault-[0-2]$}"
+    # Oathkeeper deploy pods (exclude maester explicitly)
+    PATTERN_OATHKEEPER="${PATTERN_OATHKEEPER:-^oathkeeper-[a-z0-9]+-[a-z0-9]+$}"
+    EXCLUDE_OATHKEEPER="${EXCLUDE_OATHKEEPER:-^oathkeeper-maester-}"
+    # Keto deploy pods
+    PATTERN_KETO="${PATTERN_KETO:-^keto-[a-z0-9]+-[a-z0-9]+$}"
+    # MCM API deploy pods
+    PATTERN_MCM_API="${PATTERN_MCM_API:-^mcm-connection-manager-api-}"
+    # Switch Keycloak sts pods
+    PATTERN_SWITCH_KC="${PATTERN_SWITCH_KC:-^switch-keycloak-[0-2]$}"
+
+    # Sleep between kills (seconds) => 120s = 2 minutes
+    SLEEP_SECONDS="${SLEEP_SECONDS:-120}"
+
+    # DRY run mode (true/false)
+    DRY_RUN="${DRY_RUN:-false}"
+
+    log(){ echo "[$(date -u -Is)] $*"; }
+
+    # CSV report accumulator: ns|pod|epochMillis|status
+    declare -a report_data=()
+
+    find_pods(){
+      local ns="$1" regex="$2"
+      kubectl -n "$ns" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E "$regex" || true
+    }
+
+    # Like find_pods but excludes a negative regex if provided
+    find_pods_ex(){
+      local ns="$1" regex="$2" exclude_regex="${3:-}"
+      if [[ -z "$exclude_regex" ]]; then
+        find_pods "$ns" "$regex"
+      else
+        find_pods "$ns" "$regex" | grep -Ev "$exclude_regex" || true
+      fi
+    }
+
+    pick_one(){
+      local ns="$1" regex="$2" exclude_regex="${3:-}"
+      local -a arr=()
+      while IFS= read -r p; do
+        [[ -n "$p" ]] && arr+=("$p")
+      done < <(find_pods_ex "$ns" "$regex" "$exclude_regex")
+      local count="${#arr[@]}"
+      if (( count == 0 )); then
+        echo ""
+      else
+        local idx=$(( RANDOM % count ))
+        echo "${arr[$idx]}"
+      fi
+    }
+
+    delete_pod(){
+      local ns="$1" pod="$2"
+      local epoch_ms
+      epoch_ms=$(($(date +%s%N)/1000000))
+      if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] kubectl -n $ns delete pod $pod"
+        report_data+=("${ns}|${pod}|${epoch_ms}|DRY_RUN")
+      else
+        log "Deleting pod '$pod' in namespace '$ns'"
+        if kubectl -n "$ns" delete pod "$pod" --ignore-not-found --grace-period=0 --force >/dev/null 2>&1; then
+          report_data+=("${ns}|${pod}|${epoch_ms}|DELETED")
+        else
+          report_data+=("${ns}|${pod}|${epoch_ms}|DELETE_ERROR")
+        fi
+      fi
+    }
+
+    # Ordered sequence (one random pod from each group)
+    declare -a TARGETS=()
+
+    if p="$(pick_one "$NS_VAULT" "$PATTERN_VAULT")" && [[ -n "$p" ]]; then
+      TARGETS+=("${NS_VAULT}|${p}")
+    fi
+    if p="$(pick_one "$NS_ORY" "$PATTERN_OATHKEEPER" "$EXCLUDE_OATHKEEPER")" && [[ -n "$p" ]]; then
+      TARGETS+=("${NS_ORY}|${p}")
+    fi
+    if p="$(pick_one "$NS_ORY" "$PATTERN_KETO")" && [[ -n "$p" ]]; then
+      TARGETS+=("${NS_ORY}|${p}")
+    fi
+    if p="$(pick_one "$NS_MCM" "$PATTERN_MCM_API")" && [[ -n "$p" ]]; then
+      TARGETS+=("${NS_MCM}|${p}")
+    fi
+    if p="$(pick_one "$NS_KEYCLOAK" "$PATTERN_SWITCH_KC")" && [[ -n "$p" ]]; then
+      TARGETS+=("${NS_KEYCLOAK}|${p}")
+    fi
+
+    log "Start | dry_run=$DRY_RUN | sleep=${SLEEP_SECONDS}s | targets=${#TARGETS[@]}"
+    log "Patterns: VAULT=${PATTERN_VAULT} (ns=${NS_VAULT}), OATHKEEPER=${PATTERN_OATHKEEPER} !~ ${EXCLUDE_OATHKEEPER} (ns=${NS_ORY}), KETO=${PATTERN_KETO} (ns=${NS_ORY}), MCM_API=${PATTERN_MCM_API} (ns=${NS_MCM}), SWITCH_KC=${PATTERN_SWITCH_KC} (ns=${NS_KEYCLOAK})"
+
+    if (( ${#TARGETS[@]} == 0 )); then
+      log "No matching pods found. Exiting."
+    else
+      for item in "${TARGETS[@]}"; do
+        ns="${item%%|*}"
+        pod="${item##*|}"
+        delete_pod "$ns" "$pod"
+        log "Sleeping ${SLEEP_SECONDS}s before next pod..."
+        sleep "${SLEEP_SECONDS}"
+      done
+    fi
+
+    log "All done."
+
+    echo
+    echo "=========================================="
+    echo "          TERMINATION REPORT (CSV)        "
+    echo "=========================================="
+    echo
+    echo "Pod,Termination Time,Status"
+    for entry in "${report_data[@]}"; do
+      IFS='|' read -r ns pod epoch status <<< "$entry"
+      echo "${pod},${epoch},${status}"
+    done
+    echo
+    echo "Total pods processed: ${#report_data[@]}"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-killer-security
+  namespace: ory
+  labels:
+    app: pod-killer-security
+spec:
+  serviceAccountName: pod-killer-security
+  restartPolicy: Never
+  containers:
+  - name: pod-killer
+    image: bitnami/kubectl:latest
+    command: [ "/bin/bash", "/scripts/kill-pods.sh" ]
+    env:
+    - name: NS_VAULT
+      value: "vault"
+    - name: NS_ORY
+      value: "ory"
+    - name: NS_MCM
+      value: "mcm"
+    - name: NS_KEYCLOAK
+      value: "keycloak"
+    - name: PATTERN_VAULT
+      value: "^vault-[0-2]$"
+    - name: PATTERN_OATHKEEPER
+      value: "^oathkeeper-[a-z0-9]+-[a-z0-9]+$"
+    - name: EXCLUDE_OATHKEEPER
+      value: "^oathkeeper-maester-"
+    - name: PATTERN_KETO
+      value: "^keto-[a-z0-9]+-[a-z0-9]+$"
+    - name: PATTERN_MCM_API
+      value: "^mcm-connection-manager-api-"
+    - name: PATTERN_SWITCH_KC
+      value: "^switch-keycloak-[0-2]$"
+    - name: SLEEP_SECONDS
+      value: "240"
+    - name: DRY_RUN
+      value: "false"
+    volumeMounts:
+    - name: script
+      mountPath: /scripts
+      readOnly: true
+  volumes:
+  - name: script
+    configMap:
+      name: pod-killer-security-script
+      defaultMode: 493
