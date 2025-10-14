@@ -1,0 +1,42 @@
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✗ 'p(95)<1000' p(95)=4.52s
+
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+
+    iteration_duration
+    ✗ 'p(95)<1000' p(95)=8.04s
+
+time="2025-10-14T12:19:59Z" level=error msg="thresholds on metrics 'http_req_duration, iteration_duration' have been crossed"
+
+  █ TOTAL RESULTS 
+
+    checks_total.......................: 13995  7.614074/s
+    checks_succeeded...................: 99.98% 13993 out of 13995
+    checks_failed......................: 0.01%  2 out of 13995
+
+    ✓ TRANSFERS__POST_TRANSFERS_RESPONSE_IS_200
+    ✓ TRANSFERS__PUT_TRANSFERS_ACCEPT_PARTY_RESPONSE_IS_200
+    ✓ TRANSFERS__PUT_TRANSFERS_ACCEPT_CONVERSION_RESPONSE_IS_200
+    ✗ TRANSFERS__PUT_TRANSFERS_ACCEPT_QUOTE_RESPONSE_IS_200
+      ↳  99% — ✓ 2798 / ✗ 1
+    ✗ SDK_E2E_STATUS_COMPLETED
+      ↳  99% — ✓ 2798 / ✗ 1
+
+    HTTP
+    http_req_duration.......................................................: avg=1.62s min=302.28ms med=870.36ms max=31.25s p(90)=4.05s p(95)=4.52s
+      { expected_response:true }............................................: avg=1.62s min=302.28ms med=870.36ms max=7.68s  p(90)=4.05s p(95)=4.51s
+    http_req_failed.........................................................: 0.00%  1 out of 11198
+    http_reqs...............................................................: 11198  6.092347/s
+
+    EXECUTION
+    iteration_duration......................................................: avg=6.49s min=4.7s     med=6.36s    max=33.65s p(90)=7.57s p(95)=8.04s
+    iterations..............................................................: 2799   1.522815/s
+    vus.....................................................................: 1      min=0          max=10
+    vus_max.................................................................: 10     min=10         max=10
+
+    NETWORK
+    data_received...........................................................: 190 MB 104 kB/s
+    data_sent...............................................................: 3.8 MB 2.0 kB/s
