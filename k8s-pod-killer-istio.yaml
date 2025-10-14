@@ -111,14 +111,30 @@ data:
     # Return list of target pods in a namespace matching a regex
     find_pods(){
       local ns="$1" regex="$2"
-      # Use jsonpath to list pod names, then grep by regex
       kubectl -n "$ns" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E "$regex" || true
+    }
+
+    # Pick exactly one random pod (if any) from a namespace by regex
+    pick_one(){
+      local ns="$1" regex="$2"
+      local -a arr=()
+      while IFS= read -r p; do
+        [[ -n "$p" ]] && arr+=("$p")
+      done < <(find_pods "$ns" "$regex")
+
+      local count="${#arr[@]}"
+      if (( count == 0 )); then
+        echo ""
+      else
+        # $RANDOM is a bash builtin; modulo count gives index
+        local idx=$(( RANDOM % count ))
+        echo "${arr[$idx]}"
+      fi
     }
 
     delete_pod(){
       local ns="$1" pod="$2"
       local epoch_ms
-      # millis since epoch (portable)
       epoch_ms=$(($(date +%s%N)/1000000))
 
       if [[ "$DRY_RUN" == "true" ]]; then
@@ -134,23 +150,20 @@ data:
       fi
     }
 
-    # Build ordered target list once at start (one-by-one processing)
+    # Build target list: **one random pod** per category
     declare -a TARGETS=()
 
-    # External ingress gateways
-    while IFS= read -r p; do
-      [[ -n "$p" ]] && TARGETS+=("${ISTIO_NS_EXT}|${p}")
-    done < <(find_pods "$ISTIO_NS_EXT" "$PATTERN_EXT")
+    if pod_ext="$(pick_one "$ISTIO_NS_EXT" "$PATTERN_EXT")" && [[ -n "${pod_ext}" ]]; then
+      TARGETS+=("${ISTIO_NS_EXT}|${pod_ext}")
+    fi
 
-    # Internal ingress gateways
-    while IFS= read -r p; do
-      [[ -n "$p" ]] && TARGETS+=("${ISTIO_NS_INT}|${p}")
-    done < <(find_pods "$ISTIO_NS_INT" "$PATTERN_INT")
+    if pod_int="$(pick_one "$ISTIO_NS_INT" "$PATTERN_INT")" && [[ -n "${pod_int}" ]]; then
+      TARGETS+=("${ISTIO_NS_INT}|${pod_int}")
+    fi
 
-    # ztunnel pods (ambient)
-    while IFS= read -r p; do
-      [[ -n "$p" ]] && TARGETS+=("${ISTIO_NS_SYS}|${p}")
-    done < <(find_pods "$ISTIO_NS_SYS" "$PATTERN_SYS")
+    if pod_sys="$(pick_one "$ISTIO_NS_SYS" "$PATTERN_SYS")" && [[ -n "${pod_sys}" ]]; then
+      TARGETS+=("${ISTIO_NS_SYS}|${pod_sys}")
+    fi
 
     log "Start | dry_run=$DRY_RUN | sleep=${SLEEP_SECONDS}s | targets=${#TARGETS[@]}"
     log "Patterns: ${PATTERN_EXT} (ns=${ISTIO_NS_EXT}), ${PATTERN_INT} (ns=${ISTIO_NS_INT}), ${PATTERN_SYS} (ns=${ISTIO_NS_SYS})"
@@ -158,7 +171,6 @@ data:
     if (( ${#TARGETS[@]} == 0 )); then
       log "No matching Istio pods found. Exiting."
     else
-      # One-by-one: kill, then sleep, loop
       for item in "${TARGETS[@]}"; do
         ns="${item%%|*}"
         pod="${item##*|}"
@@ -214,7 +226,7 @@ spec:
     - name: SLEEP_SECONDS
       value: "120"
     - name: DRY_RUN
-      value: "true"
+      value: "false"
     volumeMounts:
     - name: script
       mountPath: /scripts
