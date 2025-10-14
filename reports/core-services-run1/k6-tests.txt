@@ -1,0 +1,32 @@
+  █ THRESHOLDS
+
+    http_req_duration
+    ✗ 'p(95)<1000' p(95)=4.48s
+
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.02%
+
+    iteration_duration
+    ✗ 'p(95)<1000' p(95)=7.84s
+
+
+  █ TOTAL RESULTS
+
+    checks_total.......................: 14092  7.671152/s
+    checks_succeeded...................: 99.97% 14088 out of 14092
+    checks_failed......................: 0.02%  4 out of 14092
+
+    ✗ TRANSFERS__POST_TRANSFERS_RESPONSE_IS_200
+      ↳  99% — ✓ 2818 / ✗ 2
+    ✓ TRANSFERS__PUT_TRANSFERS_ACCEPT_PARTY_RESPONSE_IS_200
+    ✓ TRANSFERS__PUT_TRANSFERS_ACCEPT_CONVERSION_RESPONSE_IS_200
+    ✗ TRANSFERS__PUT_TRANSFERS_ACCEPT_QUOTE_RESPONSE_IS_200
+      ↳  99% — ✓ 2817 / ✗ 1
+    ✗ SDK_E2E_STATUS_COMPLETED
+      ↳  99% — ✓ 2817 / ✗ 1
+
+    HTTP
+    http_req_duration.......................................................: avg=1.61s min=9.7ms    med=871.35ms max=30.02s p(90)=4.04s p(95)=4.48s
+      { expected_response:true }............................................: avg=1.61s min=299.62ms med=871.37ms max=7.74s  p(90)=4.04s p(95)=4.48s
+    http_req_failed.........................................................: 0.02%  3 out of 11276
+    http_reqs...............................................................: 11276  6.138228/s

@@ -1,0 +1,12 @@
+Pod,Termination Time,Status
+moja-account-lookup-service-7994485b8-lfqvv,1760363116410,DELETED
+moja-als-msisdn-oracle-9f49d95ff-2qkqp,1760363237714,DELETED
+moja-centralledger-service-547fc678f6-7rmtj,1760363388960,DELETED
+moja-centralledger-handler-transfer-prepare-5f8556d7bb-2jr7n,1760363510237,DELETED
+moja-centralledger-handler-transfer-get-7df7f8dcc4-2z56d,1760363632456,DELETED
+moja-centralledger-handler-transfer-fulfil-55ddd6d46c-nr46p,1760363754204,DELETED
+moja-centralledger-handler-timeout-dc6745f4-j2dzn,1760363875694,DELETED
+moja-ml-api-adapter-service-df9c7d866-65h5b,1760363997101,DELETED
+moja-ml-api-adapter-handler-notification-5cd468d7b5-285kh,1760364118602,DELETED
+moja-quoting-service-77648dbb55-wnf4k,1760364240039,DELETED
+moja-quoting-service-handler-b77758c9c-45d6m,1760364361035,DELETED
