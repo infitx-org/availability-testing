@@ -173,7 +173,7 @@ spec:
     - name: SLEEP_SECONDS
       value: "300"
     - name: DRY_RUN
-      value: "true"
+      value: "false"
     volumeMounts:
     - name: script
       mountPath: /scripts
