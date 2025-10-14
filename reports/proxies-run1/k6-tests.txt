@@ -1,0 +1,40 @@
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<5000' p(95)=4.55s
+
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+
+    iteration_duration
+    ✗ 'p(95)<8000' p(95)=8s
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......................: 6960    7.656196/s
+    checks_succeeded...................: 100.00% 6960 out of 6960
+    checks_failed......................: 0.00%   0 out of 6960
+
+    ✓ TRANSFERS__POST_TRANSFERS_RESPONSE_IS_200
+    ✓ TRANSFERS__PUT_TRANSFERS_ACCEPT_PARTY_RESPONSE_IS_200
+    ✓ TRANSFERS__PUT_TRANSFERS_ACCEPT_CONVERSION_RESPONSE_IS_200
+    ✓ TRANSFERS__PUT_TRANSFERS_ACCEPT_QUOTE_RESPONSE_IS_200
+    ✓ SDK_E2E_STATUS_COMPLETED
+
+    HTTP
+time="2025-10-14T14:19:26Z" level=error msg="thresholds on metrics 'iteration_duration' have been crossed"
+    http_req_duration.......................................................: avg=1.62s min=305.13ms med=874.34ms max=7.28s  p(90)=4.05s p(95)=4.55s
+      { expected_response:true }............................................: avg=1.62s min=305.13ms med=874.34ms max=7.28s  p(90)=4.05s p(95)=4.55s
+    http_req_failed.........................................................: 0.00%  0 out of 5570
+    http_reqs...............................................................: 5570   6.127157/s
+
+    EXECUTION
+    iteration_duration......................................................: avg=6.48s min=4.67s    med=6.37s    max=10.86s p(90)=7.53s p(95)=8s   
+    iterations..............................................................: 1392   1.531239/s
+    vus.....................................................................: 1      min=0         max=10
+    vus_max.................................................................: 10     min=10        max=10
+
+    NETWORK
+    data_received...........................................................: 95 MB  104 kB/s
+    data_sent...............................................................: 1.9 MB 2.1 kB/s
