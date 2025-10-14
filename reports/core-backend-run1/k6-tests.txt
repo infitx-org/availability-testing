@@ -1,0 +1,45 @@
+  █ THRESHOLDS 
+
+time="2025-10-13T17:33:28Z" level=error msg="thresholds on metrics 'http_req_duration, iteration_duration' have been crossed"
+    http_req_duration
+    ✗ 'p(95)<1000' p(95)=4.47s
+
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.28%
+
+    iteration_duration
+    ✗ 'p(95)<1000' p(95)=7.9s
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......................: 13824  7.527007/s
+    checks_succeeded...................: 99.73% 13788 out of 13824
+    checks_failed......................: 0.26%  36 out of 13824
+
+    ✗ TRANSFERS__POST_TRANSFERS_RESPONSE_IS_200
+      ↳  99% — ✓ 2764 / ✗ 20
+    ✗ TRANSFERS__PUT_TRANSFERS_ACCEPT_PARTY_RESPONSE_IS_200
+      ↳  99% — ✓ 2760 / ✗ 4
+    ✗ TRANSFERS__PUT_TRANSFERS_ACCEPT_CONVERSION_RESPONSE_IS_200
+      ↳  99% — ✓ 2758 / ✗ 2
+    ✗ TRANSFERS__PUT_TRANSFERS_ACCEPT_QUOTE_RESPONSE_IS_200
+      ↳  99% — ✓ 2753 / ✗ 5
+    ✗ SDK_E2E_STATUS_COMPLETED
+      ↳  99% — ✓ 2753 / ✗ 5
+
+    HTTP
+    http_req_duration.......................................................: avg=1.64s min=298.99ms med=870.23ms max=31.75s p(90)=4.01s p(95)=4.47s
+      { expected_response:true }............................................: avg=1.62s min=298.99ms med=870.34ms max=29.43s p(90)=4.01s p(95)=4.47s
+    http_req_failed.........................................................: 0.28%  31 out of 11068
+    http_reqs...............................................................: 11068  6.026397/s
+
+    EXECUTION
+    iteration_duration......................................................: avg=6.53s min=307.13ms med=6.31s    max=36.24s p(90)=7.43s p(95)=7.9s 
+    iterations..............................................................: 2784   1.515856/s
+    vus.....................................................................: 3      min=1           max=10
+    vus_max.................................................................: 10     min=10          max=10
+
+    NETWORK
+    data_received...........................................................: 188 MB 102 kB/s
+    data_sent...............................................................: 3.7 MB 2.0 kB/s

@@ -1,0 +1,10 @@
+Pod,Termination Time,Status
+mojaloop-kafka-mojaloop-kafka-nodepool-0,1760375178905,DELETED
+mojaloop-redis-follower-0,1760375274544,DELETED
+mojaloop-redis-leader-0,1760375455216,DELETED
+mojaloop-kafka-mojaloop-kafka-nodepool-1,1760375486502,DELETED
+mojaloop-redis-follower-1,1760375644103,DELETED
+mojaloop-kafka-mojaloop-kafka-nodepool-2,1760375795242,DELETED
+mojaloop-redis-leader-1,1760375832833,DELETED
+mojaloop-redis-follower-2,1760376013692,DELETED
+mojaloop-redis-leader-2,1760376195093,DELETED
