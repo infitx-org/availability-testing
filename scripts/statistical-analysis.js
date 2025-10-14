@@ -73,37 +73,50 @@ function stdDev(values) {
  * This window will be used as the baseline
  */
 function findBaselineWindow(timeSeriesData, podTerminations) {
+  console.log('\n--- Step 1: Finding Baseline Window ---');
+
   const terminationTimes = podTerminations.map(t => parseTimestamp(t['Termination Time'])).sort((a, b) => a - b);
   const firstTermination = terminationTimes[0];
   const lastTermination = terminationTimes[terminationTimes.length - 1];
+
+  console.log(`First pod termination: ${new Date(firstTermination).toISOString()}`);
+  console.log(`Last pod termination: ${new Date(lastTermination).toISOString()}`);
 
   // Get all time series timestamps
   const timestamps = timeSeriesData.map(row => parseInt(row.Time)).sort((a, b) => a - b);
   const firstTimestamp = timestamps[0];
   const lastTimestamp = timestamps[timestamps.length - 1];
 
+  console.log(`Data range: ${new Date(firstTimestamp).toISOString()} to ${new Date(lastTimestamp).toISOString()}`);
+
   // Find the longest window without terminations
   let maxWindowStart = null;
   let maxWindowEnd = null;
   let maxWindowSize = 0;
+  let maxWindowLocation = '';
 
   // Check window before first termination
   const beforeWindow = timeSeriesData.filter(row => parseInt(row.Time) < firstTermination);
+  console.log(`\nChecking window BEFORE first termination: ${beforeWindow.length} samples`);
   if (beforeWindow.length > maxWindowSize) {
     maxWindowSize = beforeWindow.length;
     maxWindowStart = firstTimestamp;
     maxWindowEnd = firstTermination - 1;
+    maxWindowLocation = 'before first termination';
   }
 
   // Check window after last termination
   const afterWindow = timeSeriesData.filter(row => parseInt(row.Time) > lastTermination);
+  console.log(`Checking window AFTER last termination: ${afterWindow.length} samples`);
   if (afterWindow.length > maxWindowSize) {
     maxWindowSize = afterWindow.length;
     maxWindowStart = lastTermination + 1;
     maxWindowEnd = lastTimestamp;
+    maxWindowLocation = 'after last termination';
   }
 
   // Check gaps between terminations
+  console.log(`Checking gaps BETWEEN terminations...`);
   for (let i = 0; i < terminationTimes.length - 1; i++) {
     const gapStart = terminationTimes[i];
     const gapEnd = terminationTimes[i + 1];
@@ -111,12 +124,16 @@ function findBaselineWindow(timeSeriesData, podTerminations) {
       const t = parseInt(row.Time);
       return t > gapStart && t < gapEnd;
     });
+    console.log(`  Gap ${i + 1}: ${gapWindow.length} samples between ${new Date(gapStart).toISOString()} and ${new Date(gapEnd).toISOString()}`);
     if (gapWindow.length > maxWindowSize) {
       maxWindowSize = gapWindow.length;
       maxWindowStart = gapStart + 1;
       maxWindowEnd = gapEnd - 1;
+      maxWindowLocation = `gap ${i + 1} between terminations`;
     }
   }
+
+  console.log(`\n✓ Selected baseline window: ${maxWindowLocation} (${maxWindowSize} samples)`);
 
   return {
     start: maxWindowStart,
@@ -129,12 +146,16 @@ function findBaselineWindow(timeSeriesData, podTerminations) {
  * Calculate baseline statistics for latency and throughput
  */
 function calculateBaselineStats(timeSeriesData, baselineWindow, columnIndices) {
+  console.log('\n--- Step 2: Calculating Baseline Statistics ---');
+
   const columns = Object.keys(timeSeriesData[0]);
 
   const baselineData = timeSeriesData.filter(row => {
     const t = parseInt(row.Time);
     return t >= baselineWindow.start && t <= baselineWindow.end;
   });
+
+  console.log(`Extracting metrics from ${baselineData.length} baseline samples...`);
 
   const latencyValues = [];
   const throughputValues = [];
@@ -154,7 +175,7 @@ function calculateBaselineStats(timeSeriesData, baselineWindow, columnIndices) {
     }
   });
 
-  return {
+  const stats = {
     latency: {
       mean: mean(latencyValues),
       stdDev: stdDev(latencyValues),
@@ -166,6 +187,18 @@ function calculateBaselineStats(timeSeriesData, baselineWindow, columnIndices) {
       count: throughputValues.length
     }
   };
+
+  console.log(`Latency values: ${latencyValues.length} valid samples`);
+  console.log(`  Mean: ${stats.latency.mean.toFixed(4)} ms`);
+  console.log(`  StdDev: ${stats.latency.stdDev.toFixed(4)} ms`);
+  console.log(`  Range: [${Math.min(...latencyValues).toFixed(2)}, ${Math.max(...latencyValues).toFixed(2)}] ms`);
+
+  console.log(`Throughput values: ${throughputValues.length} valid samples`);
+  console.log(`  Mean: ${stats.throughput.mean.toFixed(4)}`);
+  console.log(`  StdDev: ${stats.throughput.stdDev.toFixed(4)}`);
+  console.log(`  Range: [${Math.min(...throughputValues).toFixed(2)}, ${Math.max(...throughputValues).toFixed(2)}]`);
+
+  return stats;
 }
 
 /**
@@ -284,19 +317,26 @@ function generateReport() {
   console.log(`  Throughput: Mean = ${baselineStats.throughput.mean.toFixed(4)}, StdDev = ${baselineStats.throughput.stdDev.toFixed(4)}`);
 
   // Step 3 & 4: Analyze each pod termination for statistical significance
+  console.log('\n--- Step 3 & 4: Analyzing Pod Terminations ---');
+
   const results = [];
   const sampleCount = 5; // Number of samples after kill to analyze
 
-  console.log(`\nAnalyzing ${sampleCount} samples after each pod termination...\n`);
+  console.log(`Will analyze ${sampleCount} samples after each pod termination`);
+  console.log(`Total pod terminations to analyze: ${podTerminations.length}\n`);
 
-  podTerminations.forEach(termination => {
+  podTerminations.forEach((termination, index) => {
     const podName = termination.Pod;
     const terminationTime = parseTimestamp(termination['Termination Time']);
     const status = termination.Status;
 
+    console.log(`[${index + 1}/${podTerminations.length}] Analyzing: ${podName}`);
+    console.log(`  Termination time: ${new Date(terminationTime).toISOString()}`);
+
     const metricsAfter = getMetricsAfterTermination(timeSeriesData, terminationTime, columnIndices, sampleCount);
 
     if (!metricsAfter || metricsAfter.latency.count === 0) {
+      console.log(`  ⚠️  No data found after termination`);
       results.push({
         Pod: podName,
         'Termination Time': termination['Termination Time'],
@@ -316,6 +356,8 @@ function generateReport() {
       return;
     }
 
+    console.log(`  Samples collected: ${metricsAfter.latency.count}`);
+
     // Calculate Z-scores
     const latencyZScore = calculateZScore(
       metricsAfter.latency.mean,
@@ -332,6 +374,11 @@ function generateReport() {
     // Assess significance
     const latencySignificance = assessSignificance(latencyZScore);
     const throughputSignificance = assessSignificance(throughputZScore);
+
+    console.log(`  Latency: ${metricsAfter.latency.mean.toFixed(4)} ms (baseline: ${baselineStats.latency.mean.toFixed(4)} ms)`);
+    console.log(`    Z-Score: ${latencyZScore.toFixed(2)} → ${latencySignificance}`);
+    console.log(`  Throughput: ${metricsAfter.throughput.mean.toFixed(4)} (baseline: ${baselineStats.throughput.mean.toFixed(4)})`);
+    console.log(`    Z-Score: ${throughputZScore.toFixed(2)} → ${throughputSignificance}`);
 
     results.push({
       Pod: podName,
