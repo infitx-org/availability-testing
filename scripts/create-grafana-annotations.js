@@ -78,7 +78,9 @@ async function createAnnotation(time, text, tags) {
  * Main function to process pod terminations and create annotations
  */
 async function main() {
-  const podTerminationsPath = path.join(__dirname, 'pod-terminations.csv');
+  // Get file path from command line argument, or use default
+  const csvFile = process.argv[2] || 'pod-terminations.csv';
+  const podTerminationsPath = path.resolve(process.cwd(), csvFile);
 
   // Check if file exists
   if (!fs.existsSync(podTerminationsPath)) {

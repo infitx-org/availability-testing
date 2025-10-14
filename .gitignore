@@ -1,4 +1,4 @@
 *-IGNORE*
-availability-report-gen/*.csv
+scripts/*.csv
 .env
 node_modules/
