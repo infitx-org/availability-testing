@@ -52,10 +52,12 @@ function parseTimestamp(timestamp) {
 
 /**
  * Merge pod terminations into k6 time series data
+ * @param {string} dataFolder - Folder containing the CSV files (relative or absolute)
  */
-function mergeData() {
-  const podTerminationsPath = path.join(__dirname, 'pod-terminations.csv');
-  const timeSeriesPath = path.join(__dirname, 'k6-time-series.csv');
+function mergeData(dataFolder = __dirname) {
+  const resolvedFolder = path.resolve(process.cwd(), dataFolder);
+  const podTerminationsPath = path.join(resolvedFolder, 'pod-terminations.csv');
+  const timeSeriesPath = path.join(resolvedFolder, 'k6-time-series.csv');
 
   // Load data
   const podTerminations = parseCSV(podTerminationsPath);
@@ -124,7 +126,7 @@ function mergeData() {
   console.log(`  - ${podTerminations.length} termination entries`);
 
   // Generate CSV output
-  const outputPath = path.join(__dirname, 'merged-time-series.csv');
+  const outputPath = path.join(resolvedFolder, 'merged-time-series.csv');
 
   // Build CSV content with new headers
   const csvLines = [newHeaders.join(',')];
@@ -159,4 +161,5 @@ function mergeData() {
 }
 
 // Run the merge
-mergeData();
+const dataFolder = process.argv[2] || '.';
+mergeData(dataFolder);
