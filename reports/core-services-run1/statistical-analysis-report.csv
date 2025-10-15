@@ -1,0 +1,12 @@
+Pod,Termination Time,Status,Samples After,Baseline Latency Mean,Baseline Latency StdDev,After Latency Mean,Latency Change (%),Latency Z-Score,Latency Significance,Baseline Throughput Mean,Baseline Throughput StdDev,After Throughput Mean,Throughput Z-Score,Throughput Significance,Success Rate
+"moja-account-lookup-service-7994485b8-lfqvv","1760363116410","DELETED","6","8.9134","0.1910","9.7481","9.37","4.37","Significant","1.5392","0.1552","1.5258","-0.09","Not Significant","100.00%"
+"moja-als-msisdn-oracle-9f49d95ff-2qkqp","1760363237714","DELETED","6","8.9134","0.1910","9.3370","4.75","2.22","Marginal","1.5392","0.1552","1.5782","0.25","Not Significant","100.00%"
+"moja-centralledger-service-547fc678f6-7rmtj","1760363388960","DELETED","6","8.9134","0.1910","9.1464","2.61","1.22","Marginal","1.5392","0.1552","1.5745","0.23","Not Significant","99.76%"
+"moja-centralledger-handler-transfer-prepare-5f8556d7bb-2jr7n","1760363510237","DELETED","6","8.9134","0.1910","8.7617","-1.70","-0.79","Not Significant","1.5392","0.1552","1.5412","0.01","Not Significant","100.00%"
+"moja-centralledger-handler-transfer-get-7df7f8dcc4-2z56d","1760363632456","DELETED","6","8.9134","0.1910","8.7026","-2.36","-1.10","Marginal","1.5392","0.1552","1.3826","-1.01","Not Significant","99.86%"
+"moja-centralledger-handler-transfer-fulfil-55ddd6d46c-nr46p","1760363754204","DELETED","6","8.9134","0.1910","8.7181","-2.19","-1.02","Marginal","1.5392","0.1552","1.3771","-1.04","Not Significant","100.00%"
+"moja-centralledger-handler-timeout-dc6745f4-j2dzn","1760363875694","DELETED","6","8.9134","0.1910","8.7324","-2.03","-0.95","Marginal","1.5392","0.1552","1.4737","-0.42","Not Significant","100.00%"
+"moja-ml-api-adapter-service-df9c7d866-65h5b","1760363997101","DELETED","6","8.9134","0.1910","8.7047","-2.34","-1.09","Marginal","1.5392","0.1552","1.4583","-0.52","Not Significant","100.00%"
+"moja-ml-api-adapter-handler-notification-5cd468d7b5-285kh","1760364118602","DELETED","6","8.9134","0.1910","8.7259","-2.10","-0.98","Marginal","1.5392","0.1552","1.4357","-0.67","Not Significant","100.00%"
+"moja-quoting-service-77648dbb55-wnf4k","1760364240039","DELETED","6","8.9134","0.1910","8.7056","-2.33","-1.09","Marginal","1.5392","0.1552","1.4619","-0.50","Not Significant","100.00%"
+"moja-quoting-service-handler-b77758c9c-45d6m","1760364361035","DELETED","6","8.9134","0.1910","8.8400","-0.82","-0.38","Not Significant","1.5392","0.1552","1.5301","-0.06","Not Significant","100.00%"

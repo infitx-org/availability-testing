@@ -24,11 +24,11 @@
  *   - statistical-analysis-report.csv: Generated in the supplied folder with columns:
  *     Pod, Termination Time, Status, Samples Before, Samples After,
  *     Before Latency Mean, After Latency Mean, Latency Change (%), Latency Significance,
- *     Before Throughput Mean, After Throughput Mean, Throughput Change (%), Throughput Significance,
- *     Failures Detected
+ *     Before Throughput Mean, After Throughput Mean, Throughput Z-Score, Throughput Significance,
+ *     Success Rate
  *
  * ANALYSIS METHODS:
- *   The script supports three baseline methods (configured via BASELINE_METHOD constant):
+ *   The script supports two baseline methods (configured via BASELINE_METHOD constant):
  *
  *   Method 0: Global Baseline
  *     - Uses a single baseline from either a clean run or the chaos run (omitting first/last 1min)
@@ -40,21 +40,17 @@
  *     - Naturally handles performance drift by using local context
  *     - Best for detecting real disruptions caused by pod terminations
  *
- *   Method 2: Detrended Analysis
- *     - Removes linear trend from entire dataset using regression
- *     - Then compares 30s before vs 30s after each termination
- *     - Useful when there's systematic drift (latency decreasing, throughput increasing)
- *
  * SIGNIFICANCE THRESHOLDS (Percentage Change):
  *   - Highly Significant: > 10%
  *   - Significant:        > 5%
  *   - Marginal:           > 2%
  *   - Not Significant:    ≤ 2%
  *
- * FAILURE DETECTION:
- *   - Checks columns at index 4+ (check rate columns) in the 30s after window
- *   - If any value is between 0 and 1 (indicating failed checks), marks as "YES"
- *   - Otherwise marks as "NO"
+ * SUCCESS RATE CALCULATION:
+ *   - Calculates average success rate from check rate columns (indices 4+) in 30s after window
+ *   - Check rate columns contain values between 0 and 1 representing success rate
+ *   - Formula: (sum of all check rates / number of check rates) * 100
+ *   - If no check rate data found, assumes 100% success
  *
  * PERFORMANCE DRIFT:
  *   During performance tests, latency often decreases over time due to:
@@ -73,13 +69,11 @@ const path = require('path');
 // Baseline method selection:
 // 0 = Global baseline (clean run or omit first/last 1min from chaos run)
 // 1 = Local baseline (30s before vs 30s after each termination)
-// 2 = Detrended analysis (remove linear trend, then compare)
-const BASELINE_METHOD = 1;
+const BASELINE_METHOD = 0;
 
 const METHOD_NAMES = {
   0: 'Global Baseline',
-  1: 'Local Baseline (Before vs After)',
-  2: 'Detrended Analysis (Linear Regression)'
+  1: 'Local Baseline (Before vs After)'
 };
 
 /**
@@ -297,17 +291,32 @@ function getMetricsAfterTermination(timeSeriesData, terminationTime, columnIndic
     }
   });
 
-  // Check for test failures in check rate columns (indices 4+)
-  let hasFailures = false;
-  for (let i = 4; i < columns.length; i++) {
-    for (const row of afterData) {
-      const value = parseFloat(row[columns[i]]);
-      if (!isNaN(value) && value > 0 && value < 1) {
-        hasFailures = true;
-        break;
+  // Calculate success rate from check rate columns
+  // Check rate columns contain failure indicators based on PromQL: (-delta(k6_checks_rate[15s])) > 0
+  // These columns (SDK_E2E_STATUS_COMPLETED, TRANSFERS__POST_TRANSFERS_RESPONSE_IS_200, etc.)
+  // only appear when there are check failures
+  // When values appear (> 0), they represent check rates during failure periods
+  const checkRates = [];
+
+  if (columnIndices.checkColumns && columnIndices.checkColumns.length > 0) {
+    // Use the specific check columns found in the data
+    for (const checkColIndex of columnIndices.checkColumns) {
+      for (const row of afterData) {
+        const value = parseFloat(row[columns[checkColIndex]]);
+        if (!isNaN(value) && value >= 0 && value <= 1) {
+          checkRates.push(value);
+        }
       }
     }
-    if (hasFailures) break;
+  }
+
+  // If check rates found in failure columns, calculate success rate
+  // If no check rate data (empty), assume 100% success (no failures detected)
+  let successRate = 100;
+  if (checkRates.length > 0) {
+    const avgCheckRate = mean(checkRates);
+    // The check rate columns show failure rate, so success = 100 - failure rate
+    successRate = 100 - (avgCheckRate * 100);
   }
 
   return {
@@ -322,7 +331,7 @@ function getMetricsAfterTermination(timeSeriesData, terminationTime, columnIndic
       count: throughputValues.length
     },
     windowSeconds: windowSeconds,
-    hasFailures: hasFailures
+    successRate: successRate
   };
 }
 
@@ -333,6 +342,15 @@ function getMetricsAfterTermination(timeSeriesData, terminationTime, columnIndic
 function calculatePercentageChange(value, baselineMean) {
   if (baselineMean === 0) return 0;
   return ((value - baselineMean) / baselineMean) * 100;
+}
+
+/**
+ * Calculate Z-score
+ * Returns how many standard deviations away from the mean a value is
+ */
+function calculateZScore(value, baselineMean, baselineStdDev) {
+  if (baselineStdDev === 0) return 0;
+  return (value - baselineMean) / baselineStdDev;
 }
 
 /**
@@ -350,6 +368,27 @@ function assessSignificance(percentageChange) {
   } else if (absChange > 5.0) {
     return 'Significant';
   } else if (absChange > 2.0) {
+    return 'Marginal';
+  } else {
+    return 'Not Significant';
+  }
+}
+
+/**
+ * Assess significance based on Z-score
+ * Using thresholds:
+ * |Z| > 2.58 = Highly Significant (99% confidence, p < 0.01)
+ * |Z| > 1.96 = Significant (95% confidence, p < 0.05)
+ * |Z| > 1.28 = Marginal (90% confidence, p < 0.10)
+ * |Z| <= 1.28 = Not Significant
+ */
+function assessSignificanceByZScore(zScore) {
+  const absZ = Math.abs(zScore);
+  if (absZ > 2.58) {
+    return 'Highly Significant';
+  } else if (absZ > 1.96) {
+    return 'Significant';
+  } else if (absZ > 1.28) {
     return 'Marginal';
   } else {
     return 'Not Significant';
@@ -411,80 +450,6 @@ function getMetricsBeforeTermination(timeSeriesData, terminationTime, columnIndi
   };
 }
 
-/**
- * Calculate linear regression for trend analysis
- * Returns slope and intercept: y = slope * x + intercept
- */
-function linearRegression(xValues, yValues) {
-  const n = xValues.length;
-  const sumX = xValues.reduce((a, b) => a + b, 0);
-  const sumY = yValues.reduce((a, b) => a + b, 0);
-  const sumXY = xValues.reduce((sum, x, i) => sum + x * yValues[i], 0);
-  const sumXX = xValues.reduce((sum, x) => sum + x * x, 0);
-
-  const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
-  const intercept = (sumY - slope * sumX) / n;
-
-  return { slope, intercept };
-}
-
-/**
- * Detrend time series data by removing linear trend
- */
-function detrendData(timeSeriesData, columnIndices) {
-  const columns = Object.keys(timeSeriesData[0]);
-
-  // Extract timestamps and values
-  const timestamps = timeSeriesData.map(row => parseInt(row.Time));
-  const latencyValues = [];
-  const throughputValues = [];
-
-  timeSeriesData.forEach(row => {
-    const latency = parseFloat(row[columns[columnIndices.latency]]);
-    const throughput = parseFloat(row[columns[columnIndices.throughput]]);
-
-    latencyValues.push(!isNaN(latency) && latency > 0 ? latency : 0);
-    throughputValues.push(!isNaN(throughput) && throughput > 0 ? throughput : 0);
-  });
-
-  // Calculate linear regression for latency
-  const latencyRegression = linearRegression(timestamps, latencyValues);
-  const throughputRegression = linearRegression(timestamps, throughputValues);
-
-  // Calculate mean for centering
-  const latencyMean = mean(latencyValues.filter(v => v > 0));
-  const throughputMean = mean(throughputValues.filter(v => v > 0));
-
-  // Create detrended data
-  const detrendedData = timeSeriesData.map((row, index) => {
-    const timestamp = timestamps[index];
-    const latency = latencyValues[index];
-    const throughput = throughputValues[index];
-
-    // Detrend: remove trend and add back mean to center
-    const detrendedLatency = latency > 0
-      ? latency - (latencyRegression.slope * timestamp + latencyRegression.intercept) + latencyMean
-      : latency;
-    const detrendedThroughput = throughput > 0
-      ? throughput - (throughputRegression.slope * timestamp + throughputRegression.intercept) + throughputMean
-      : throughput;
-
-    return {
-      ...row,
-      detrendedLatency,
-      detrendedThroughput
-    };
-  });
-
-  return {
-    data: detrendedData,
-    latencyRegression,
-    throughputRegression,
-    latencyMean,
-    throughputMean
-  };
-}
-
 // ============================================
 // ANALYSIS METHODS
 // ============================================
@@ -496,6 +461,7 @@ function detrendData(timeSeriesData, columnIndices) {
 function analyzeWithGlobalBaseline(timeSeriesData, podTerminations, columnIndices, baselineStats, windowSeconds = 30) {
   console.log('\n--- Method 0: Global Baseline Analysis ---');
   console.log(`Baseline: Mean Latency = ${baselineStats.latency.mean.toFixed(4)} ms, StdDev = ${baselineStats.latency.stdDev.toFixed(4)} ms`);
+  console.log(`Baseline: Mean Throughput = ${baselineStats.throughput.mean.toFixed(4)}, StdDev = ${baselineStats.throughput.stdDev.toFixed(4)}`);
   console.log(`Will analyze ${windowSeconds}s time window after each pod termination\n`);
 
   const results = [];
@@ -517,27 +483,33 @@ function analyzeWithGlobalBaseline(timeSeriesData, podTerminations, columnIndice
         Status: status,
         'Samples After': 0,
         'Baseline Latency Mean': baselineStats.latency.mean.toFixed(4),
+        'Baseline Latency StdDev': baselineStats.latency.stdDev.toFixed(4),
         'After Latency Mean': 'N/A',
         'Latency Change (%)': 'N/A',
+        'Latency Z-Score': 'N/A',
         'Latency Significance': 'N/A',
         'Baseline Throughput Mean': baselineStats.throughput.mean.toFixed(4),
+        'Baseline Throughput StdDev': baselineStats.throughput.stdDev.toFixed(4),
         'After Throughput Mean': 'N/A',
-        'Throughput Change (%)': 'N/A',
+        'Throughput Z-Score': 'N/A',
         'Throughput Significance': 'N/A',
-        'Failures Detected': 'N/A'
+        'Success Rate': 'N/A'
       });
       return;
     }
 
     const latencyChange = calculatePercentageChange(metricsAfter.latency.mean, baselineStats.latency.mean);
-    const throughputChange = calculatePercentageChange(metricsAfter.throughput.mean, baselineStats.throughput.mean);
+
+    // Calculate Z-scores using baseline stats
+    const latencyZScore = calculateZScore(metricsAfter.latency.mean, baselineStats.latency.mean, baselineStats.latency.stdDev);
+    const throughputZScore = calculateZScore(metricsAfter.throughput.mean, baselineStats.throughput.mean, baselineStats.throughput.stdDev);
 
     const latencySignificance = assessSignificance(latencyChange);
-    const throughputSignificance = assessSignificance(throughputChange);
+    const throughputSignificance = assessSignificanceByZScore(throughputZScore);
 
-    console.log(`  Latency: ${metricsAfter.latency.mean.toFixed(4)} ms (baseline: ${baselineStats.latency.mean.toFixed(4)} ms) → ${latencyChange > 0 ? '+' : ''}${latencyChange.toFixed(2)}% (${latencySignificance})`);
-    console.log(`  Throughput: ${metricsAfter.throughput.mean.toFixed(4)} (baseline: ${baselineStats.throughput.mean.toFixed(4)}) → ${throughputChange > 0 ? '+' : ''}${throughputChange.toFixed(2)}% (${throughputSignificance})`);
-    console.log(`  Failures: ${metricsAfter.hasFailures ? 'YES' : 'NO'}`);
+    console.log(`  Latency: ${metricsAfter.latency.mean.toFixed(4)} ms (baseline: ${baselineStats.latency.mean.toFixed(4)} ms) → ${latencyChange > 0 ? '+' : ''}${latencyChange.toFixed(2)}% (Z=${latencyZScore.toFixed(2)}, ${latencySignificance})`);
+    console.log(`  Throughput: ${metricsAfter.throughput.mean.toFixed(4)} (baseline: ${baselineStats.throughput.mean.toFixed(4)}) → Z=${throughputZScore.toFixed(2)}, ${throughputSignificance}`);
+    console.log(`  Success Rate: ${metricsAfter.successRate.toFixed(2)}%`);
 
     results.push({
       Pod: podName,
@@ -545,14 +517,17 @@ function analyzeWithGlobalBaseline(timeSeriesData, podTerminations, columnIndice
       Status: status,
       'Samples After': metricsAfter.latency.count,
       'Baseline Latency Mean': baselineStats.latency.mean.toFixed(4),
+      'Baseline Latency StdDev': baselineStats.latency.stdDev.toFixed(4),
       'After Latency Mean': metricsAfter.latency.mean.toFixed(4),
       'Latency Change (%)': latencyChange.toFixed(2),
+      'Latency Z-Score': latencyZScore.toFixed(2),
       'Latency Significance': latencySignificance,
       'Baseline Throughput Mean': baselineStats.throughput.mean.toFixed(4),
+      'Baseline Throughput StdDev': baselineStats.throughput.stdDev.toFixed(4),
       'After Throughput Mean': metricsAfter.throughput.mean.toFixed(4),
-      'Throughput Change (%)': throughputChange.toFixed(2),
+      'Throughput Z-Score': throughputZScore.toFixed(2),
       'Throughput Significance': throughputSignificance,
-      'Failures Detected': metricsAfter.hasFailures ? 'YES' : 'NO'
+      'Success Rate': metricsAfter.successRate.toFixed(2) + '%'
     });
   });
 
@@ -566,6 +541,18 @@ function analyzeWithGlobalBaseline(timeSeriesData, podTerminations, columnIndice
 function analyzeWithLocalBaseline(timeSeriesData, podTerminations, columnIndices, beforeWindowSeconds = 60, afterWindowSeconds = 30) {
   console.log('\n--- Method 1: Local Baseline Analysis (Before vs After) ---');
   console.log(`Before window: ${beforeWindowSeconds}s, After window: ${afterWindowSeconds}s\n`);
+
+  // Calculate baseline throughput stddev from entire dataset
+  const columns = Object.keys(timeSeriesData[0]);
+  const allThroughputValues = [];
+  timeSeriesData.forEach(row => {
+    const throughput = parseFloat(row[columns[columnIndices.throughput]]);
+    if (!isNaN(throughput) && throughput > 0) {
+      allThroughputValues.push(throughput);
+    }
+  });
+  const baselineThroughputStdDev = stdDev(allThroughputValues);
+  console.log(`Baseline throughput stddev (from entire dataset): ${baselineThroughputStdDev.toFixed(4)}\n`);
 
   const results = [];
 
@@ -588,14 +575,17 @@ function analyzeWithLocalBaseline(timeSeriesData, podTerminations, columnIndices
         'Samples Before': 0,
         'Samples After': metricsAfter ? metricsAfter.latency.count : 0,
         'Before Latency Mean': 'N/A',
+        'Before Latency StdDev': 'N/A',
         'After Latency Mean': 'N/A',
         'Latency Change (%)': 'N/A',
+        'Latency Z-Score': 'N/A',
         'Latency Significance': 'N/A',
         'Before Throughput Mean': 'N/A',
+        'Baseline Throughput StdDev': baselineThroughputStdDev.toFixed(4),
         'After Throughput Mean': 'N/A',
-        'Throughput Change (%)': 'N/A',
+        'Throughput Z-Score': 'N/A',
         'Throughput Significance': 'N/A',
-        'Failures Detected': metricsAfter && metricsAfter.hasFailures ? 'YES' : 'N/A'
+        'Success Rate': metricsAfter ? metricsAfter.successRate.toFixed(2) + '%' : 'N/A'
       });
       return;
     }
@@ -609,29 +599,38 @@ function analyzeWithLocalBaseline(timeSeriesData, podTerminations, columnIndices
         'Samples Before': metricsBefore.latency.count,
         'Samples After': 0,
         'Before Latency Mean': metricsBefore.latency.mean.toFixed(4),
+        'Before Latency StdDev': metricsBefore.latency.stdDev.toFixed(4),
         'After Latency Mean': 'N/A',
         'Latency Change (%)': 'N/A',
+        'Latency Z-Score': 'N/A',
         'Latency Significance': 'N/A',
         'Before Throughput Mean': metricsBefore.throughput.mean.toFixed(4),
+        'Baseline Throughput StdDev': baselineThroughputStdDev.toFixed(4),
         'After Throughput Mean': 'N/A',
-        'Throughput Change (%)': 'N/A',
+        'Throughput Z-Score': 'N/A',
         'Throughput Significance': 'N/A',
-        'Failures Detected': 'N/A'
+        'Success Rate': 'N/A'
       });
       return;
     }
 
     // Calculate percentage change using local before baseline
     const latencyChange = calculatePercentageChange(metricsAfter.latency.mean, metricsBefore.latency.mean);
-    const throughputChange = calculatePercentageChange(metricsAfter.throughput.mean, metricsBefore.throughput.mean);
+
+    // Calculate Z-scores
+    // For latency: compare after mean with before mean and stddev (as before)
+    const latencyZScore = calculateZScore(metricsAfter.latency.mean, metricsBefore.latency.mean, metricsBefore.latency.stdDev);
+
+    // For throughput: use baseline stddev from entire dataset
+    const throughputZScore = calculateZScore(metricsAfter.throughput.mean, metricsBefore.throughput.mean, baselineThroughputStdDev);
 
     const latencySignificance = assessSignificance(latencyChange);
-    const throughputSignificance = assessSignificance(throughputChange);
+    const throughputSignificance = assessSignificanceByZScore(throughputZScore);
 
-    console.log(`  Before: Latency=${metricsBefore.latency.mean.toFixed(4)} ms (±${metricsBefore.latency.stdDev.toFixed(4)}), Throughput=${metricsBefore.throughput.mean.toFixed(4)}`);
+    console.log(`  Before: Latency=${metricsBefore.latency.mean.toFixed(4)} ms (±${metricsBefore.latency.stdDev.toFixed(4)}), Throughput=${metricsBefore.throughput.mean.toFixed(4)} (±${metricsBefore.throughput.stdDev.toFixed(4)})`);
     console.log(`  After:  Latency=${metricsAfter.latency.mean.toFixed(4)} ms, Throughput=${metricsAfter.throughput.mean.toFixed(4)}`);
-    console.log(`  Impact: Latency ${latencyChange > 0 ? '+' : ''}${latencyChange.toFixed(2)}% (${latencySignificance}), Throughput ${throughputChange > 0 ? '+' : ''}${throughputChange.toFixed(2)}% (${throughputSignificance})`);
-    console.log(`  Failures: ${metricsAfter.hasFailures ? 'YES' : 'NO'}`);
+    console.log(`  Impact: Latency ${latencyChange > 0 ? '+' : ''}${latencyChange.toFixed(2)}% (Z=${latencyZScore.toFixed(2)}, ${latencySignificance}), Throughput Z=${throughputZScore.toFixed(2)} (${throughputSignificance})`);
+    console.log(`  Success Rate: ${metricsAfter.successRate.toFixed(2)}%`);
 
     results.push({
       Pod: podName,
@@ -640,138 +639,22 @@ function analyzeWithLocalBaseline(timeSeriesData, podTerminations, columnIndices
       'Samples Before': metricsBefore.latency.count,
       'Samples After': metricsAfter.latency.count,
       'Before Latency Mean': metricsBefore.latency.mean.toFixed(4),
+      'Before Latency StdDev': metricsBefore.latency.stdDev.toFixed(4),
       'After Latency Mean': metricsAfter.latency.mean.toFixed(4),
       'Latency Change (%)': latencyChange.toFixed(2),
+      'Latency Z-Score': latencyZScore.toFixed(2),
       'Latency Significance': latencySignificance,
       'Before Throughput Mean': metricsBefore.throughput.mean.toFixed(4),
+      'Baseline Throughput StdDev': baselineThroughputStdDev.toFixed(4),
       'After Throughput Mean': metricsAfter.throughput.mean.toFixed(4),
-      'Throughput Change (%)': throughputChange.toFixed(2),
+      'Throughput Z-Score': throughputZScore.toFixed(2),
       'Throughput Significance': throughputSignificance,
-      'Failures Detected': metricsAfter.hasFailures ? 'YES' : 'NO'
+      'Success Rate': metricsAfter.successRate.toFixed(2) + '%'
     });
   });
 
   return results;
 }
-
-/**
- * Method 2: Detrended Analysis
- * Removes linear trend then compares before vs after
- */
-function analyzeWithDetrending(timeSeriesData, podTerminations, columnIndices, beforeWindowSeconds = 60, afterWindowSeconds = 30) {
-  console.log('\n--- Method 2: Detrended Analysis (Linear Regression) ---');
-
-  // Detrend the entire dataset
-  console.log('Calculating linear trend...');
-  const detrendResult = detrendData(timeSeriesData, columnIndices);
-
-  console.log(`Latency trend: slope = ${detrendResult.latencyRegression.slope.toExponential(4)} ms/ms`);
-  console.log(`Throughput trend: slope = ${detrendResult.throughputRegression.slope.toExponential(4)} /ms`);
-  console.log(`Before window: ${beforeWindowSeconds}s, After window: ${afterWindowSeconds}s\n`);
-
-  const results = [];
-
-  podTerminations.forEach((termination, index) => {
-    const podName = termination.Pod;
-    const terminationTime = parseTimestamp(termination['Termination Time']);
-    const status = termination.Status;
-
-    console.log(`[${index + 1}/${podTerminations.length}] Analyzing: ${podName}`);
-
-    // Get detrended metrics before and after
-    const beforeWindowStart = terminationTime - (beforeWindowSeconds * 1000);
-    const afterWindowEnd = terminationTime + (afterWindowSeconds * 1000);
-
-    const beforeSamples = detrendResult.data.filter(row => {
-      const t = parseInt(row.Time);
-      return t >= beforeWindowStart && t < terminationTime;
-    });
-
-    const afterSamples = detrendResult.data.filter(row => {
-      const t = parseInt(row.Time);
-      return t > terminationTime && t <= afterWindowEnd;
-    });
-
-    if (beforeSamples.length === 0 || afterSamples.length === 0) {
-      console.log(`  ⚠️  Insufficient data`);
-      results.push({
-        Pod: podName,
-        'Termination Time': termination['Termination Time'],
-        Status: status,
-        'Samples Before': beforeSamples.length,
-        'Samples After': afterSamples.length,
-        'Before Detrended Latency': 'N/A',
-        'After Detrended Latency': 'N/A',
-        'Latency Change (%)': 'N/A',
-        'Latency Significance': 'N/A',
-        'Before Detrended Throughput': 'N/A',
-        'After Detrended Throughput': 'N/A',
-        'Throughput Change (%)': 'N/A',
-        'Throughput Significance': 'N/A',
-        'Failures Detected': 'N/A'
-      });
-      return;
-    }
-
-    const beforeLatencies = beforeSamples.map(s => s.detrendedLatency).filter(v => v > 0);
-    const afterLatencies = afterSamples.map(s => s.detrendedLatency).filter(v => v > 0);
-    const beforeThroughputs = beforeSamples.map(s => s.detrendedThroughput).filter(v => v > 0);
-    const afterThroughputs = afterSamples.map(s => s.detrendedThroughput).filter(v => v > 0);
-
-    // Check for failures in check rate columns (indices 4+)
-    const columns = Object.keys(timeSeriesData[0]);
-    let hasFailures = false;
-    for (let i = 4; i < columns.length; i++) {
-      for (const row of afterSamples) {
-        const value = parseFloat(row[columns[i]]);
-        if (!isNaN(value) && value > 0 && value < 1) {
-          hasFailures = true;
-          break;
-        }
-      }
-      if (hasFailures) break;
-    }
-
-    const beforeLatencyMean = mean(beforeLatencies);
-    const beforeLatencyStdDev = stdDev(beforeLatencies);
-    const afterLatencyMean = mean(afterLatencies);
-
-    const beforeThroughputMean = mean(beforeThroughputs);
-    const beforeThroughputStdDev = stdDev(beforeThroughputs);
-    const afterThroughputMean = mean(afterThroughputs);
-
-    const latencyChange = calculatePercentageChange(afterLatencyMean, beforeLatencyMean);
-    const throughputChange = calculatePercentageChange(afterThroughputMean, beforeThroughputMean);
-
-    const latencySignificance = assessSignificance(latencyChange);
-    const throughputSignificance = assessSignificance(throughputChange);
-
-    console.log(`  Detrended Before: Lat=${beforeLatencyMean.toFixed(4)} ms, Tput=${beforeThroughputMean.toFixed(4)}`);
-    console.log(`  Detrended After:  Lat=${afterLatencyMean.toFixed(4)} ms, Tput=${afterThroughputMean.toFixed(4)}`);
-    console.log(`  Impact: Latency ${latencyChange > 0 ? '+' : ''}${latencyChange.toFixed(2)}% (${latencySignificance}), Throughput ${throughputChange > 0 ? '+' : ''}${throughputChange.toFixed(2)}% (${throughputSignificance})`);
-    console.log(`  Failures: ${hasFailures ? 'YES' : 'NO'}`);
-
-    results.push({
-      Pod: podName,
-      'Termination Time': termination['Termination Time'],
-      Status: status,
-      'Samples Before': beforeLatencies.length,
-      'Samples After': afterLatencies.length,
-      'Before Detrended Latency': beforeLatencyMean.toFixed(4),
-      'After Detrended Latency': afterLatencyMean.toFixed(4),
-      'Latency Change (%)': latencyChange.toFixed(2),
-      'Latency Significance': latencySignificance,
-      'Before Detrended Throughput': beforeThroughputMean.toFixed(4),
-      'After Detrended Throughput': afterThroughputMean.toFixed(4),
-      'Throughput Change (%)': throughputChange.toFixed(2),
-      'Throughput Significance': throughputSignificance,
-      'Failures Detected': hasFailures ? 'YES' : 'NO'
-    });
-  });
-
-  return results;
-}
-
 
 /**
  * Generate statistical analysis report
@@ -791,15 +674,44 @@ function generateReport() {
   console.log(`Loaded ${podTerminations.length} pod terminations`);
   console.log(`Loaded ${timeSeriesData.length} time series data points`);
 
-  // Determine column indices
+  // Dynamically determine column indices by searching for column names
+  const columns = Object.keys(timeSeriesData[0]);
+  const latencyIndex = columns.findIndex(col => col.includes('Latency'));
+  const throughputIndex = columns.findIndex(col => col.includes('Throughput'));
+
+  // Find check columns for success rate calculation (these columns only appear when there are failures)
+  const checkColumns = [
+    'SDK_E2E_STATUS_COMPLETED',
+    'TRANSFERS__POST_TRANSFERS_RESPONSE_IS_200',
+    'TRANSFERS__PUT_TRANSFERS_ACCEPT_CONVERSION_RESPONSE_IS_200',
+    'TRANSFERS__PUT_TRANSFERS_ACCEPT_PARTY_RESPONSE_IS_200',
+    'TRANSFERS__PUT_TRANSFERS_ACCEPT_QUOTE_RESPONSE_IS_200'
+  ];
+
+  const checkColumnIndices = [];
+  checkColumns.forEach(checkCol => {
+    const idx = columns.findIndex(col => col === checkCol);
+    if (idx !== -1) {
+      checkColumnIndices.push(idx);
+    }
+  });
+
+  if (latencyIndex === -1 || throughputIndex === -1) {
+    console.error('Error: Could not find Latency or Throughput columns in the data');
+    console.error('Available columns:', columns);
+    process.exit(1);
+  }
+
   const columnIndices = {
-    latency: 2,
-    throughput: 3,
-    failures: 4
+    latency: latencyIndex,
+    throughput: throughputIndex,
+    checkColumns: checkColumnIndices
   };
 
-  const columns = Object.keys(timeSeriesData[0]);
-  console.log(`Using columns - Latency: ${columns[columnIndices.latency]}, Throughput: ${columns[columnIndices.throughput]}`);
+  console.log(`Using columns - Latency: ${columns[columnIndices.latency]} (index ${latencyIndex}), Throughput: ${columns[columnIndices.throughput]} (index ${throughputIndex})`);
+  if (checkColumnIndices.length > 0) {
+    console.log(`Found ${checkColumnIndices.length} check columns for success rate calculation:`, checkColumnIndices.map(i => columns[i]));
+  }
   console.log(`\nAnalysis Method: ${BASELINE_METHOD} - ${METHOD_NAMES[BASELINE_METHOD]}`);
 
   // Route to appropriate analysis method
@@ -810,19 +722,42 @@ function generateReport() {
       // Method 0: Global Baseline
       let baselineData;
       let baselineWindow;
+      let baselineColumnIndices = columnIndices; // Use same indices by default
 
       if (cleanRunPath) {
         console.log(`Using clean run file for baseline: ${cleanRunPath}`);
         baselineData = parseCSV(cleanRunPath);
         console.log(`Loaded ${baselineData.length} samples from clean run`);
         baselineWindow = findBaselineWindowByTime(baselineData, 60);
+
+        // Calculate column indices for the baseline data (may be different from chaos run)
+        const baselineColumns = Object.keys(baselineData[0]);
+        const baselineLatencyIndex = baselineColumns.findIndex(col => col.includes('Latency'));
+        const baselineThroughputIndex = baselineColumns.findIndex(col => col.includes('Throughput'));
+
+        // Find check columns in baseline data
+        const baselineCheckColumnIndices = [];
+        checkColumns.forEach(checkCol => {
+          const idx = baselineColumns.findIndex(col => col === checkCol);
+          if (idx !== -1) {
+            baselineCheckColumnIndices.push(idx);
+          }
+        });
+
+        baselineColumnIndices = {
+          latency: baselineLatencyIndex,
+          throughput: baselineThroughputIndex,
+          checkColumns: baselineCheckColumnIndices
+        };
+
+        console.log(`Baseline columns - Latency: ${baselineColumns[baselineLatencyIndex]} (index ${baselineLatencyIndex}), Throughput: ${baselineColumns[baselineThroughputIndex]} (index ${baselineThroughputIndex})`);
       } else {
         console.log(`Using chaos run data for baseline (no clean run provided)`);
         baselineData = timeSeriesData;
         baselineWindow = findBaselineWindowByTime(timeSeriesData, 60);
       }
 
-      const baselineStats = calculateBaselineStats(baselineData, baselineWindow, columnIndices);
+      const baselineStats = calculateBaselineStats(baselineData, baselineWindow, baselineColumnIndices);
       results = analyzeWithGlobalBaseline(timeSeriesData, podTerminations, columnIndices, baselineStats, 30);
       break;
     }
@@ -833,14 +768,8 @@ function generateReport() {
       break;
     }
 
-    case 2: {
-      // Method 2: Detrended Analysis
-      results = analyzeWithDetrending(timeSeriesData, podTerminations, columnIndices, 30, 30);
-      break;
-    }
-
     default:
-      console.error(`ERROR: Invalid BASELINE_METHOD (${BASELINE_METHOD}). Valid values are: 0, 1, 2`);
+      console.error(`ERROR: Invalid BASELINE_METHOD (${BASELINE_METHOD}). Valid values are: 0, 1`);
       process.exit(1);
   }
 

@@ -1,0 +1,10 @@
+Pod,Termination Time,Status,Samples After,Baseline Latency Mean,Baseline Latency StdDev,After Latency Mean,Latency Change (%),Latency Z-Score,Latency Significance,Baseline Throughput Mean,Baseline Throughput StdDev,After Throughput Mean,Throughput Z-Score,Throughput Significance,Success Rate
+"mojaloop-kafka-mojaloop-kafka-nodepool-0","1760375178905","DELETED","6","8.9134","0.1910","9.2966","4.30","2.01","Marginal","1.5392","0.1552","1.5089","-0.20","Not Significant","100.00%"
+"mojaloop-redis-follower-0","1760375274544","DELETED","6","8.9134","0.1910","9.2095","3.32","1.55","Marginal","1.5392","0.1552","1.5787","0.25","Not Significant","100.00%"
+"mojaloop-redis-leader-0","1760375455216","DELETED","6","8.9134","0.1910","8.9463","0.37","0.17","Not Significant","1.5392","0.1552","1.4755","-0.41","Not Significant","100.00%"
+"mojaloop-kafka-mojaloop-kafka-nodepool-1","1760375486502","DELETED","6","8.9134","0.1910","8.9946","0.91","0.43","Not Significant","1.5392","0.1552","1.5449","0.04","Not Significant","100.00%"
+"mojaloop-redis-follower-1","1760375644103","DELETED","6","8.9134","0.1910","8.8937","-0.22","-0.10","Not Significant","1.5392","0.1552","1.5874","0.31","Not Significant","100.00%"
+"mojaloop-kafka-mojaloop-kafka-nodepool-2","1760375795242","DELETED","6","8.9134","0.1910","8.8896","-0.27","-0.12","Not Significant","1.5392","0.1552","1.5438","0.03","Not Significant","100.00%"
+"mojaloop-redis-leader-1","1760375832833","DELETED","6","8.9134","0.1910","8.8939","-0.22","-0.10","Not Significant","1.5392","0.1552","1.4545","-0.55","Not Significant","100.00%"
+"mojaloop-redis-follower-2","1760376013692","DELETED","5","8.9134","0.1910","8.8759","-0.42","-0.20","Not Significant","1.5392","0.1552","1.9877","2.89","Highly Significant","99.46%"
+"mojaloop-redis-leader-2","1760376195093","DELETED","6","8.9134","0.1910","9.4833","6.39","2.98","Significant","1.5392","0.1552","1.5810","0.27","Not Significant","100.00%"

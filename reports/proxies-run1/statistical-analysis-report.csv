@@ -1,0 +1,3 @@
+Pod,Termination Time,Status,Samples After,Baseline Latency Mean,Baseline Latency StdDev,After Latency Mean,Latency Change (%),Latency Z-Score,Latency Significance,Baseline Throughput Mean,Baseline Throughput StdDev,After Throughput Mean,Throughput Z-Score,Throughput Significance,Success Rate
+"proxy-zmw-inter-scheme-proxy-adapter-8486bb8f64-p7l6l","1760450921267","DELETED","6","8.9134","0.1910","9.5911","7.60","3.55","Significant","1.5392","0.1552","1.5513","0.08","Not Significant","100.00%"
+"proxy-mwk-inter-scheme-proxy-adapter-6bb8c754db-d55jw","1760451221543","DELETED","6","8.9134","0.1910","9.2855","4.17","1.95","Marginal","1.5392","0.1552","1.5710","0.21","Not Significant","100.00%"

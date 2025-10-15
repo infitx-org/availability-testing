@@ -1,0 +1,4 @@
+Pod,Termination Time,Status,Samples After,Baseline Latency Mean,Baseline Latency StdDev,After Latency Mean,Latency Change (%),Latency Z-Score,Latency Significance,Baseline Throughput Mean,Baseline Throughput StdDev,After Throughput Mean,Throughput Z-Score,Throughput Significance,Success Rate
+"istio-external-ingress-gw-6sv8m","1760437054503","DELETED","6","8.9134","0.1910","9.6292","8.03","3.75","Significant","1.5392","0.1552","1.1976","-2.20","Significant","100.00%"
+"istio-internal-ingress-gw-7bff7","1760437234613","DELETED","6","8.9134","0.1910","10.4767","17.54","8.19","Highly Significant","1.5392","0.1552","1.6147","0.49","Not Significant","100.00%"
+"ztunnel-lmxpm","1760437414724","DELETED","6","8.9134","0.1910","9.5964","7.66","3.58","Significant","1.5392","0.1552","1.4797","-0.38","Not Significant","99.60%"

@@ -1,0 +1,6 @@
+Pod,Termination Time,Status,Samples After,Baseline Latency Mean,Baseline Latency StdDev,After Latency Mean,Latency Change (%),Latency Z-Score,Latency Significance,Baseline Throughput Mean,Baseline Throughput StdDev,After Throughput Mean,Throughput Z-Score,Throughput Significance,Success Rate
+"vault-2","1760442871900","DELETED","6","8.9134","0.1910","9.4064","5.53","2.58","Significant","1.5392","0.1552","1.4770","-0.40","Not Significant","100.00%"
+"oathkeeper-65cdcccc4f-9ldll","1760443112108","DELETED","6","8.9134","0.1910","9.1201","2.32","1.08","Marginal","1.5392","0.1552","1.4196","-0.77","Not Significant","100.00%"
+"keto-ddcc854b5-6zrdw","1760443352369","DELETED","6","8.9134","0.1910","9.0726","1.79","0.83","Not Significant","1.5392","0.1552","1.4316","-0.69","Not Significant","100.00%"
+"mcm-connection-manager-api-d44c56dbc-h4xp6","1760443592506","DELETED","6","8.9134","0.1910","9.0397","1.42","0.66","Not Significant","1.5392","0.1552","1.5097","-0.19","Not Significant","100.00%"
+"switch-keycloak-2","1760443832641","DELETED","6","8.9134","0.1910","9.0398","1.42","0.66","Not Significant","1.5392","0.1552","1.5117","-0.18","Not Significant","100.00%"
